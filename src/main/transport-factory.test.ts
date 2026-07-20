@@ -40,6 +40,12 @@ describe('config builders', () => {
     expect(opts).toEqual({ host: 'h', port: 21, user: 'u', password: 'pw', secure: true });
   });
 
+  it('buildFtpAccessOptions maps ftpSecurity to basic-ftp secure values', () => {
+    expect(buildFtpAccessOptions({ ...ftpProfile, ftpSecurity: 'none' }, {}).secure).toBe(false);
+    expect(buildFtpAccessOptions({ ...ftpProfile, ftpSecurity: 'explicit' }, {}).secure).toBe(true);
+    expect(buildFtpAccessOptions({ ...ftpProfile, ftpSecurity: 'implicit' }, {}).secure).toBe('implicit');
+  });
+
   it('buildSftpConnectConfig maps key/passphrase from secrets and username from profile', () => {
     const cfg = buildSftpConnectConfig(sftpProfile, { privateKey: 'KEY', passphrase: 'pp' });
     expect(cfg).toEqual({ host: 'h', port: 22, username: 'u', privateKey: 'KEY', passphrase: 'pp' });

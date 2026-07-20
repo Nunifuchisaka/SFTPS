@@ -5,6 +5,7 @@ FTP / SFTP / Amazon S3 に対応した、クロスプラットフォーム（Win
 ## 特長
 
 - **3 プロトコル対応**: FTP / FTPS（basic-ftp）、SFTP（ssh2-sftp-client）、Amazon S3（@aws-sdk/client-s3）を共通インタフェースで扱う
+- **FTPS 明示/暗黙 TLS**: FTP は `ftpSecurity`（none=平文 / explicit=AUTH TLS / implicit=暗黙TLS）で選択。新規プロファイルの既定は安全側の explicit
 - **一文字単位の差分ビュー**: アップロード前にローカルとリモートの差分を文字単位で色分け表示（追加=緑 / 削除=赤）。追加/削除文字数のサマリ付き。バイナリはサイズ比較に自動フォールバック
 - **上書き前バックアップ**: 既存リモートファイルを上書きする前に自動でローカルへ退避。世代ローテーションと履歴からの復元に対応
 - **安全なシークレット保管**: パスワード・秘密鍵・AWS シークレットは OS の暗号化（Windows: DPAPI / macOS: Keychain）を使う Electron `safeStorage` で暗号化して保存。プロファイル JSON には平文シークレットを一切書かない
@@ -14,7 +15,7 @@ FTP / SFTP / Amazon S3 に対応した、クロスプラットフォーム（Win
 
 | プロトコル | 必須項目 | シークレット（暗号化保存） |
 |---|---|---|
-| FTP / FTPS | host, port, user, secure | password |
+| FTP / FTPS | host, port, user, ftpSecurity（none / explicit / implicit、既定 explicit） | password |
 | SFTP | host, port, user（任意: hostKeyPolicy = tofu / strict） | password / privateKey / passphrase |
 | S3 | region, bucket, accessKeyId | secretAccessKey / sessionToken |
 

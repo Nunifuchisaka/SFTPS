@@ -1,4 +1,4 @@
-import type { Profile, Protocol } from '../core/profile/index';
+import type { FtpSecurity, Profile, Protocol } from '../core/profile/index';
 import type { RemoteEntry } from '../core/transport/index';
 import type { BackupInfo } from '../core/backup/index';
 import { createDiffView } from './diff-view';
@@ -139,7 +139,11 @@ export function mountApp(root: string | HTMLElement): void {
     const portIn = input('port', 'ポート', 'number');
     const userIn = input('user', 'ユーザー');
     const passIn = input('password', 'パスワード', 'password');
-    const secureIn = h('input', { type: 'checkbox', name: 'secure' }) as HTMLInputElement;
+    const ftpSecIn = h('select', { class: 'form_1__input' }, [
+      h('option', { value: 'explicit' }, ['FTPS 明示 (AUTH TLS)']),
+      h('option', { value: 'implicit' }, ['FTPS 暗黙 (implicit)']),
+      h('option', { value: 'none' }, ['平文 FTP（非推奨）']),
+    ]) as HTMLSelectElement;
     const keyIn = textarea('privateKey', '秘密鍵（PEM）');
     const passphraseIn = input('passphrase', 'パスフレーズ', 'password');
     const regionIn = input('region', 'リージョン');
@@ -151,7 +155,7 @@ export function mountApp(root: string | HTMLElement): void {
       fields.replaceChildren(idIn, nameIn);
       const proto2 = proto.value as Protocol;
       if (proto2 === 'ftp') {
-        fields.append(hostIn, portIn, userIn, passIn, h('label', {}, [secureIn, 'FTPS（secure）']));
+        fields.append(hostIn, portIn, userIn, passIn, h('label', {}, ['TLS: ', ftpSecIn]));
       } else if (proto2 === 'sftp') {
         fields.append(hostIn, portIn, userIn, passIn, keyIn, passphraseIn);
       } else {
@@ -171,7 +175,7 @@ export function mountApp(root: string | HTMLElement): void {
         port: Number(portIn.value),
         user: userIn.value.trim(),
         password: passIn.value,
-        secure: secureIn.checked,
+        ftpSecurity: ftpSecIn.value as FtpSecurity,
         privateKey: keyIn.value,
         passphrase: passphraseIn.value,
         region: regionIn.value.trim(),
@@ -467,7 +471,7 @@ function buildProfileFromForm(
     port: number;
     user: string;
     password: string;
-    secure: boolean;
+    ftpSecurity: FtpSecurity;
     privateKey: string;
     passphrase: string;
     region: string;
@@ -484,7 +488,7 @@ function buildProfileFromForm(
       host: v.host,
       port: v.port,
       user: v.user,
-      secure: v.secure,
+      ftpSecurity: v.ftpSecurity,
       ...(v.password ? { password: v.password } : {}),
     };
   }

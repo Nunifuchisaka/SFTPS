@@ -1,5 +1,8 @@
 export type Protocol = 'ftp' | 'sftp' | 's3';
 
+/** FTP の TLS モード。none=平文 / explicit=AUTH TLS / implicit=暗黙TLS。 */
+export type FtpSecurity = 'none' | 'explicit' | 'implicit';
+
 export interface FtpProfile {
   id: string;
   name: string;
@@ -7,6 +10,9 @@ export interface FtpProfile {
   host: string;
   port: number;
   user: string;
+  /** TLS モード。未指定時は secure(旧) → 既定 explicit の順で解決される。 */
+  ftpSecurity?: FtpSecurity;
+  /** @deprecated ftpSecurity へ移行。true=explicit 相当の後方互換フラグ。 */
   secure?: boolean;
   /** シークレット（JSON へは保存しない）。 */
   password?: string;
@@ -54,6 +60,17 @@ export const SECRET_KEYS = [
   'sessionToken',
 ] as const;
 
+/**
+ * FTP プロファイルの実効 TLS モードを解決する（純粋関数）。
+ * 優先順位: 明示の ftpSecurity → 旧 secure ブール → 既定 'explicit'（安全側）。
+ */
+export function resolveFtpSecurity(profile: FtpProfile): FtpSecurity {
+  if (profile.ftpSecurity !== undefined) return profile.ftpSecurity;
+  if (profile.secure === true) return 'explicit';
+  if (profile.secure === false) return 'none';
+  return 'explicit';
+}
+
 /** S3 バケット名の命名規則を検証する。 */
 function isValidBucketName(name: string): boolean {
   if (name.length < 3 || name.length > 63) return false;
@@ -77,6 +94,15 @@ export function validateProfile(profile: Profile): string[] {
         errors.push('port must be an integer between 1 and 65535');
       }
       if (!profile.user?.trim()) errors.push('user is required');
+      if (
+        profile.protocol === 'ftp' &&
+        profile.ftpSecurity !== undefined &&
+        profile.ftpSecurity !== 'none' &&
+        profile.ftpSecurity !== 'explicit' &&
+        profile.ftpSecurity !== 'implicit'
+      ) {
+        errors.push('ftpSecurity must be "none", "explicit" or "implicit"');
+      }
       if (
         profile.protocol === 'sftp' &&
         profile.hostKeyPolicy !== undefined &&

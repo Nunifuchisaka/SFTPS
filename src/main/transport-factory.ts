@@ -10,7 +10,14 @@ import {
   type S3ClientLike,
   type RemoteTransport,
 } from '../core/transport/index';
-import type { FtpProfile, Profile, S3Profile, SftpProfile } from '../core/profile/index';
+import {
+  resolveFtpSecurity,
+  type FtpProfile,
+  type FtpSecurity,
+  type Profile,
+  type S3Profile,
+  type SftpProfile,
+} from '../core/profile/index';
 import type { HostVerifierFn } from '../core/hostkey/index';
 
 export type Secrets = Record<string, string>;
@@ -33,6 +40,18 @@ export interface TransportFactoryDeps {
   makeSftpHostVerifier?: (profile: SftpProfile) => HostVerifierFn;
 }
 
+/** FTP の TLS モードを basic-ftp の secure 値へ変換する。 */
+function toBasicFtpSecure(mode: FtpSecurity): boolean | 'implicit' {
+  switch (mode) {
+    case 'none':
+      return false;
+    case 'explicit':
+      return true;
+    case 'implicit':
+      return 'implicit';
+  }
+}
+
 /** basic-ftp の access() へ渡す接続オプションを組み立てる。 */
 export function buildFtpAccessOptions(profile: FtpProfile, secrets: Secrets) {
   return {
@@ -40,7 +59,7 @@ export function buildFtpAccessOptions(profile: FtpProfile, secrets: Secrets) {
     port: profile.port,
     user: profile.user,
     password: secrets.password ?? '',
-    secure: profile.secure ?? false,
+    secure: toBasicFtpSecure(resolveFtpSecurity(profile)),
   };
 }
 

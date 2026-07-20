@@ -4,6 +4,7 @@ import {
   stripSecrets,
   assertNoSecrets,
   extractSecrets,
+  resolveFtpSecurity,
   serializeProfiles,
   parseProfiles,
   type FtpProfile,
@@ -69,11 +70,36 @@ describe('validateProfile', () => {
     expect(validateProfile(bad).some((e) => /hostKeyPolicy/.test(e))).toBe(true);
   });
 
+  it('accepts a valid ftpSecurity value (implicit FTPS on port 990)', () => {
+    expect(validateProfile({ ...validFtp, ftpSecurity: 'implicit', port: 990 })).toEqual([]);
+  });
+
+  it('rejects an unknown ftpSecurity value', () => {
+    const bad = { ...validFtp, ftpSecurity: 'bogus' } as unknown as FtpProfile;
+    expect(validateProfile(bad).some((e) => /ftpSecurity/.test(e))).toBe(true);
+  });
+
   it('rejects invalid S3 bucket names', () => {
     expect(validateProfile({ ...validS3, bucket: 'Ab' }).length).toBeGreaterThan(0); // 大文字・短すぎ
     expect(validateProfile({ ...validS3, bucket: 'has..dots' }).length).toBeGreaterThan(0); // 連続ドット
     expect(validateProfile({ ...validS3, bucket: '192.168.0.1' }).length).toBeGreaterThan(0); // IP形式
     expect(validateProfile({ ...validS3, bucket: 'ok-bucket.1' })).toEqual([]);
+  });
+});
+
+describe('resolveFtpSecurity', () => {
+  it('uses an explicit ftpSecurity value when present', () => {
+    expect(resolveFtpSecurity({ ...validFtp, ftpSecurity: 'implicit' })).toBe('implicit');
+    expect(resolveFtpSecurity({ ...validFtp, ftpSecurity: 'none' })).toBe('none');
+  });
+
+  it('falls back to the legacy secure boolean', () => {
+    expect(resolveFtpSecurity({ ...validFtp, secure: true })).toBe('explicit');
+    expect(resolveFtpSecurity({ ...validFtp, secure: false })).toBe('none');
+  });
+
+  it('defaults to explicit FTPS (secure side) when nothing is set', () => {
+    expect(resolveFtpSecurity(validFtp)).toBe('explicit');
   });
 });
 
@@ -125,6 +151,13 @@ describe('serializeProfiles / parseProfiles', () => {
     const json = serializeProfiles([validFtp]);
     const parsed = parseProfiles(json);
     expect(parsed).toEqual([stripSecrets(validFtp)]);
+  });
+
+  it('preserves ftpSecurity through serialize/parse without leaking secrets', () => {
+    const json = serializeProfiles([{ ...validFtp, ftpSecurity: 'implicit' }]);
+    expect(json).not.toContain('hunter2');
+    const parsed = parseProfiles(json);
+    expect((parsed[0] as FtpProfile).ftpSecurity).toBe('implicit');
   });
 
   it('rejects JSON with an invalid protocol', () => {
