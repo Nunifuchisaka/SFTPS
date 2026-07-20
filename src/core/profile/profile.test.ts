@@ -5,6 +5,7 @@ import {
   assertNoSecrets,
   extractSecrets,
   resolveFtpSecurity,
+  resolveSecretUpdate,
   serializeProfiles,
   parseProfiles,
   type FtpProfile,
@@ -100,6 +101,23 @@ describe('resolveFtpSecurity', () => {
 
   it('defaults to explicit FTPS (secure side) when nothing is set', () => {
     expect(resolveFtpSecurity(validFtp)).toBe('explicit');
+  });
+});
+
+describe('resolveSecretUpdate', () => {
+  it('updates when a new secret value is entered', () => {
+    expect(resolveSecretUpdate('newpw', true)).toEqual({ action: 'update' });
+    expect(resolveSecretUpdate('newpw', false)).toEqual({ action: 'update' });
+  });
+
+  it('keeps the existing secret when the field is left blank (never wipes on blank)', () => {
+    expect(resolveSecretUpdate('', true)).toEqual({ action: 'keep' });
+    expect(resolveSecretUpdate('   ', true)).toEqual({ action: 'keep' });
+    expect(resolveSecretUpdate('', false)).toEqual({ action: 'keep' });
+  });
+
+  it('clears only on an explicit clear request', () => {
+    expect(resolveSecretUpdate('', true, true)).toEqual({ action: 'clear' });
   });
 });
 

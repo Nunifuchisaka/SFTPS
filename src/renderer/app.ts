@@ -1,10 +1,16 @@
-import type { FtpSecurity, Profile, Protocol } from '../core/profile/index';
+import type { Profile, Protocol } from '../core/profile/index';
 import type { RemoteEntry } from '../core/transport/index';
 import type { BackupInfo } from '../core/backup/index';
 import type { CompareBy } from '../core/sync/index';
 import type { SyncFolderOptions } from '../shared/ipc';
 import { createDiffView } from './diff-view';
 import { createSyncPlanView } from './sync-view';
+import {
+  buildProfileFromForm,
+  profileToFormValues,
+  emptyFormValues,
+  type FormValues,
+} from './profile-form';
 
 const api = window.api;
 
@@ -45,6 +51,7 @@ interface State {
   remoteEntries: RemoteEntry[];
   selectedRemote: string | null;
   syncLocalDir: string | null;
+  editing: Profile | null;
 }
 
 export function mountApp(root: string | HTMLElement): void {
@@ -60,6 +67,7 @@ export function mountApp(root: string | HTMLElement): void {
     remoteEntries: [],
     selectedRemote: null,
     syncLocalDir: null,
+    editing: null,
   };
 
   const statusBar = h('div', { class: 'status_1' });
@@ -105,16 +113,19 @@ export function mountApp(root: string | HTMLElement): void {
       const active = p.id === state.currentProfileId;
       const item = h('li', { class: `list_1__item${active ? ' is_active' : ''}` }, [
         h('span', { class: 'list_1__label' }, [`${p.name} [${p.protocol}]`]),
+        h('button', { class: 'btn_1', onclick: () => void selectProfile(p.id) }, ['接続']),
         h(
           'button',
-          { class: 'btn_1', onclick: () => void selectProfile(p.id) },
-          ['接続'],
+          {
+            class: 'btn_1',
+            onclick: () => {
+              state.editing = p;
+              renderProfiles();
+            },
+          },
+          ['編集'],
         ),
-        h(
-          'button',
-          { class: 'btn_1', onclick: () => void deleteProfile(p.id) },
-          ['削除'],
-        ),
+        h('button', { class: 'btn_1', onclick: () => void deleteProfile(p.id) }, ['削除']),
       ]);
       list.append(item);
     }
@@ -123,40 +134,59 @@ export function mountApp(root: string | HTMLElement): void {
   }
 
   function renderProfileForm(): HTMLElement {
+    const editing = state.editing;
+    const fv: FormValues = editing ? profileToFormValues(editing) : emptyFormValues();
+
     const form = h('form', { class: 'form_1' });
     const proto = h('select', { class: 'form_1__input' }, [
       h('option', { value: 'ftp' }, ['FTP']),
       h('option', { value: 'sftp' }, ['SFTP']),
       h('option', { value: 's3' }, ['S3']),
     ]) as HTMLSelectElement;
+    proto.value = fv.protocol;
 
     const fields = h('div', { class: 'form_1__fields' });
 
-    function input(name: string, label: string, type = 'text'): HTMLInputElement {
-      const inp = h('input', { class: 'form_1__input', type, name, placeholder: label });
-      return inp as HTMLInputElement;
+    function input(value: string, label: string, type = 'text'): HTMLInputElement {
+      return h('input', { class: 'form_1__input', type, value, placeholder: label }) as HTMLInputElement;
     }
-    function textarea(name: string, label: string): HTMLTextAreaElement {
-      return h('textarea', { class: 'form_1__input', name, placeholder: label }) as HTMLTextAreaElement;
+    function textarea(value: string, label: string): HTMLTextAreaElement {
+      const el = h('textarea', { class: 'form_1__input', placeholder: label }) as HTMLTextAreaElement;
+      el.value = value;
+      return el;
+    }
+    function select(value: string, options: Array<[string, string]>): HTMLSelectElement {
+      const el = h(
+        'select',
+        { class: 'form_1__input' },
+        options.map(([v, label]) => h('option', { value: v }, [label])),
+      ) as HTMLSelectElement;
+      el.value = value;
+      return el;
     }
 
-    const idIn = input('id', 'ID（一意）');
-    const nameIn = input('name', '表示名');
-    const hostIn = input('host', 'ホスト');
-    const portIn = input('port', 'ポート', 'number');
-    const userIn = input('user', 'ユーザー');
-    const passIn = input('password', 'パスワード', 'password');
-    const ftpSecIn = h('select', { class: 'form_1__input' }, [
-      h('option', { value: 'explicit' }, ['FTPS 明示 (AUTH TLS)']),
-      h('option', { value: 'implicit' }, ['FTPS 暗黙 (implicit)']),
-      h('option', { value: 'none' }, ['平文 FTP（非推奨）']),
-    ]) as HTMLSelectElement;
-    const keyIn = textarea('privateKey', '秘密鍵（PEM）');
-    const passphraseIn = input('passphrase', 'パスフレーズ', 'password');
-    const regionIn = input('region', 'リージョン');
-    const bucketIn = input('bucket', 'バケット');
-    const akidIn = input('accessKeyId', 'Access Key ID');
-    const secretIn = input('secretAccessKey', 'Secret Access Key', 'password');
+    const idIn = input(fv.id, 'ID（一意）');
+    if (editing) idIn.readOnly = true; // 編集は同一idの上書き
+    const nameIn = input(fv.name, '表示名');
+    const hostIn = input(fv.host, 'ホスト');
+    const portIn = input(String(fv.port), 'ポート', 'number');
+    const userIn = input(fv.user, 'ユーザー');
+    const passIn = input('', editing ? 'パスワード（変更時のみ入力）' : 'パスワード', 'password');
+    const ftpSecIn = select(fv.ftpSecurity, [
+      ['explicit', 'FTPS 明示 (AUTH TLS)'],
+      ['implicit', 'FTPS 暗黙 (implicit)'],
+      ['none', '平文 FTP（非推奨）'],
+    ]);
+    const hostKeyIn = select(fv.hostKeyPolicy, [
+      ['tofu', 'ホスト鍵: TOFU（初回信頼）'],
+      ['strict', 'ホスト鍵: strict（既知のみ）'],
+    ]);
+    const keyIn = textarea('', editing ? '秘密鍵（変更時のみ入力）' : '秘密鍵（PEM）');
+    const passphraseIn = input('', 'パスフレーズ', 'password');
+    const regionIn = input(fv.region, 'リージョン');
+    const bucketIn = input(fv.bucket, 'バケット');
+    const akidIn = input(fv.accessKeyId, 'Access Key ID');
+    const secretIn = input('', editing ? 'Secret Access Key（変更時のみ）' : 'Secret Access Key', 'password');
 
     function rebuildFields(): void {
       fields.replaceChildren(idIn, nameIn);
@@ -164,7 +194,7 @@ export function mountApp(root: string | HTMLElement): void {
       if (proto2 === 'ftp') {
         fields.append(hostIn, portIn, userIn, passIn, h('label', {}, ['TLS: ', ftpSecIn]));
       } else if (proto2 === 'sftp') {
-        fields.append(hostIn, portIn, userIn, passIn, keyIn, passphraseIn);
+        fields.append(hostIn, portIn, userIn, passIn, keyIn, passphraseIn, h('label', {}, ['鍵検証: ', hostKeyIn]));
       } else {
         fields.append(regionIn, bucketIn, akidIn, secretIn);
       }
@@ -173,33 +203,56 @@ export function mountApp(root: string | HTMLElement): void {
     rebuildFields();
 
     const submit = h('button', { class: 'btn_1 btn_1--primary', type: 'submit' }, ['保存']);
+    const newBtn = h(
+      'button',
+      {
+        class: 'btn_1',
+        type: 'button',
+        onclick: () => {
+          state.editing = null;
+          renderProfiles();
+        },
+      },
+      ['新規'],
+    );
+
     form.addEventListener('submit', (ev) => {
       ev.preventDefault();
-      const p = buildProfileFromForm(proto.value as Protocol, {
+      const values: FormValues = {
+        protocol: proto.value as Protocol,
         id: idIn.value.trim(),
         name: nameIn.value.trim(),
         host: hostIn.value.trim(),
         port: Number(portIn.value),
         user: userIn.value.trim(),
         password: passIn.value,
-        ftpSecurity: ftpSecIn.value as FtpSecurity,
+        ftpSecurity: ftpSecIn.value as FormValues['ftpSecurity'],
         privateKey: keyIn.value,
         passphrase: passphraseIn.value,
+        hostKeyPolicy: hostKeyIn.value as FormValues['hostKeyPolicy'],
         region: regionIn.value.trim(),
         bucket: bucketIn.value.trim(),
         accessKeyId: akidIn.value.trim(),
         secretAccessKey: secretIn.value,
-      });
-      void saveProfile(p);
+      };
+      void saveProfile(buildProfileFromForm(values));
     });
 
-    form.append(h('h3', {}, ['プロファイル追加/編集']), proto, fields, submit);
+    form.append(
+      h('h3', {}, [editing ? `プロファイル編集: ${editing.id}` : 'プロファイル新規追加']),
+      proto,
+      fields,
+      h('div', { class: 'form_1__actions' }, [submit, newBtn]),
+    );
     return form;
   }
 
   async function saveProfile(p: Profile): Promise<void> {
     const r = await guard('プロファイル保存', () => api.saveProfile(p));
-    if (r) await refreshProfiles();
+    if (r) {
+      state.editing = null;
+      await refreshProfiles();
+    }
   }
 
   async function deleteProfile(id: string): Promise<void> {
@@ -545,58 +598,4 @@ export function mountApp(root: string | HTMLElement): void {
     renderTransfer();
     renderSync();
   })();
-}
-
-function buildProfileFromForm(
-  protocol: Protocol,
-  v: {
-    id: string;
-    name: string;
-    host: string;
-    port: number;
-    user: string;
-    password: string;
-    ftpSecurity: FtpSecurity;
-    privateKey: string;
-    passphrase: string;
-    region: string;
-    bucket: string;
-    accessKeyId: string;
-    secretAccessKey: string;
-  },
-): Profile {
-  if (protocol === 'ftp') {
-    return {
-      id: v.id,
-      name: v.name,
-      protocol: 'ftp',
-      host: v.host,
-      port: v.port,
-      user: v.user,
-      ftpSecurity: v.ftpSecurity,
-      ...(v.password ? { password: v.password } : {}),
-    };
-  }
-  if (protocol === 'sftp') {
-    return {
-      id: v.id,
-      name: v.name,
-      protocol: 'sftp',
-      host: v.host,
-      port: v.port,
-      user: v.user,
-      ...(v.password ? { password: v.password } : {}),
-      ...(v.privateKey ? { privateKey: v.privateKey } : {}),
-      ...(v.passphrase ? { passphrase: v.passphrase } : {}),
-    };
-  }
-  return {
-    id: v.id,
-    name: v.name,
-    protocol: 's3',
-    region: v.region,
-    bucket: v.bucket,
-    ...(v.accessKeyId ? { accessKeyId: v.accessKeyId } : {}),
-    ...(v.secretAccessKey ? { secretAccessKey: v.secretAccessKey } : {}),
-  };
 }

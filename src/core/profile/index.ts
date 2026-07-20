@@ -129,6 +129,24 @@ export function stripSecrets<T extends Profile>(profile: T): T {
   return clone as T;
 }
 
+export type SecretUpdateAction = 'keep' | 'update' | 'clear';
+
+/**
+ * 編集フォームのシークレット欄から、保存時のシークレット更新方針を決める純粋関数。
+ * - 入力あり → update（新しい値で上書き）
+ * - 空欄 → keep（既存を据え置き。空欄で既存シークレットを誤って消さない）
+ * - 明示クリア要求時のみ → clear
+ */
+export function resolveSecretUpdate(
+  formValue: string,
+  existingHadSecret: boolean,
+  explicitClear = false,
+): { action: SecretUpdateAction } {
+  if (explicitClear && existingHadSecret) return { action: 'clear' };
+  if (formValue.trim() !== '') return { action: 'update' };
+  return { action: 'keep' };
+}
+
 /** プロファイルからシークレットフィールドのみを抽出する（値が設定されているもののみ）。 */
 export function extractSecrets(profile: Profile): Record<string, string> {
   const source = profile as unknown as Record<string, unknown>;
