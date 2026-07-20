@@ -1,0 +1,42 @@
+import { ipcMain, dialog, safeStorage } from 'electron';
+import { homedir } from 'node:os';
+import { IPC } from '../../shared/ipc';
+import type { Profile } from '../../core/profile/index';
+import type { AppService } from '../app-service';
+import { listLocalDir } from '../local-fs';
+
+/** AppService のメソッドを ipcMain.handle に結線する。ここはロジックを持たない薄い層。 */
+export function registerIpc(service: AppService): void {
+  ipcMain.handle(IPC.listProfiles, () => service.listProfiles());
+  ipcMain.handle(IPC.saveProfile, (_e, input: Profile) => service.saveProfile(input));
+  ipcMain.handle(IPC.deleteProfile, (_e, id: string) => service.deleteProfile(id));
+  ipcMain.handle(IPC.testConnection, (_e, id: string) => service.testConnection(id));
+  ipcMain.handle(IPC.listRemote, (_e, id: string, dir: string) => service.listRemote(id, dir));
+  ipcMain.handle(IPC.prepareUpload, (_e, id: string, local: string, remote: string) =>
+    service.prepareUpload(id, local, remote),
+  );
+  ipcMain.handle(IPC.commitUpload, (_e, id: string, local: string, remote: string) =>
+    service.commitUpload(id, local, remote),
+  );
+  ipcMain.handle(IPC.download, (_e, id: string, remote: string, save: string) =>
+    service.download(id, remote, save),
+  );
+  ipcMain.handle(IPC.listBackups, (_e, id: string, remote: string) =>
+    service.listBackups(id, remote),
+  );
+  ipcMain.handle(IPC.restoreBackup, (_e, id: string, remote: string, ts?: Date) =>
+    service.restoreBackup(id, remote, ts ? new Date(ts) : undefined),
+  );
+  ipcMain.handle(IPC.isSecretStorageAvailable, () => safeStorage.isEncryptionAvailable());
+  ipcMain.handle(IPC.listLocal, (_e, dir: string) => listLocalDir(dir));
+  ipcMain.handle(IPC.homeDir, () => homedir());
+
+  ipcMain.handle(IPC.pickFile, async () => {
+    const result = await dialog.showOpenDialog({ properties: ['openFile'] });
+    return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0];
+  });
+  ipcMain.handle(IPC.pickSavePath, async (_e, defaultName: string) => {
+    const result = await dialog.showSaveDialog({ defaultPath: defaultName });
+    return result.canceled || !result.filePath ? null : result.filePath;
+  });
+}

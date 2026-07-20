@@ -1,0 +1,147 @@
+import { writeFile } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
+import path from 'node:path';
+import type { RemoteEntry, RemoteTransport } from '../core/transport/index';
+import type { BackupInfo, BackupManager } from '../core/backup/index';
+import {
+  extractSecrets,
+  stripSecrets,
+  validateProfile,
+  type Profile,
+} from '../core/profile/index';
+import {
+  prepareUpload as corePrepareUpload,
+  commitUpload as coreCommitUpload,
+  type CommitResult,
+  type UploadPreview,
+} from '../core/upload/index';
+import type { SecretStore } from './secret-store';
+import type { ProfileStore } from './profile-store';
+import type { Secrets } from './transport-factory';
+import type { ConnectionResult } from '../shared/ipc';
+
+export interface AppServiceDeps {
+  profileStore: ProfileStore;
+  secretStore: SecretStore;
+  backupManager: BackupManager;
+  createTransport: (profile: Profile, secrets: Secrets) => RemoteTransport;
+}
+
+/**
+ * IPC ハンドラの中身となる純粋なアプリケーションサービス。
+ * Electron / ipcMain には依存せず、単体テスト可能な形で全機能を提供する。
+ */
+export class AppService {
+  constructor(private readonly deps: AppServiceDeps) {}
+
+  async listProfiles(): Promise<Profile[]> {
+    return this.deps.profileStore.list();
+  }
+
+  /**
+   * プロファイルを保存する。シークレットは SecretStore へ分離し、
+   * プロファイル JSON には決して平文で書かない。
+   * シークレットがあるのに暗号化が使えない場合は保存を拒否する（例外）。
+   */
+  async saveProfile(input: Profile): Promise<Profile> {
+    const errors = validateProfile(input);
+    if (errors.length > 0) {
+      throw new Error(`invalid profile: ${errors.join(', ')}`);
+    }
+
+    const secrets = extractSecrets(input);
+    if (Object.keys(secrets).length > 0) {
+      // 暗号化が使えなければここで例外 → プロファイルは永続化されない。
+      await this.deps.secretStore.setSecrets(input.id, secrets);
+    }
+
+    const stripped = stripSecrets(input);
+    const profiles = await this.deps.profileStore.list();
+    const next = profiles.filter((p) => p.id !== input.id);
+    next.push(stripped);
+    await this.deps.profileStore.saveAll(next);
+    return stripped;
+  }
+
+  async deleteProfile(id: string): Promise<void> {
+    const profiles = await this.deps.profileStore.list();
+    await this.deps.profileStore.saveAll(profiles.filter((p) => p.id !== id));
+    await this.deps.secretStore.deleteSecrets(id);
+  }
+
+  async testConnection(id: string): Promise<ConnectionResult> {
+    try {
+      await this.withTransport(id, async () => undefined);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  async listRemote(id: string, remoteDir: string): Promise<RemoteEntry[]> {
+    return this.withTransport(id, (transport) => transport.list(remoteDir));
+  }
+
+  async prepareUpload(id: string, localPath: string, remotePath: string): Promise<UploadPreview> {
+    return this.withTransport(id, (transport) =>
+      corePrepareUpload(transport, localPath, remotePath),
+    );
+  }
+
+  async commitUpload(id: string, localPath: string, remotePath: string): Promise<CommitResult> {
+    return this.withTransport(id, (transport) =>
+      coreCommitUpload(transport, this.deps.backupManager, id, localPath, remotePath),
+    );
+  }
+
+  async download(
+    id: string,
+    remotePath: string,
+    savePath: string,
+  ): Promise<{ bytesWritten: number }> {
+    return this.withTransport(id, async (transport) => {
+      const data = await transport.readFile(remotePath);
+      await mkdir(path.dirname(savePath), { recursive: true });
+      await writeFile(savePath, data);
+      return { bytesWritten: data.length };
+    });
+  }
+
+  async listBackups(id: string, remotePath: string): Promise<BackupInfo[]> {
+    return this.deps.backupManager.listBackups(id, remotePath);
+  }
+
+  /** バックアップ内容をリモートへ書き戻す（世代を指定しなければ最新）。 */
+  async restoreBackup(
+    id: string,
+    remotePath: string,
+    timestamp?: Date,
+  ): Promise<{ bytesWritten: number }> {
+    const data = await this.deps.backupManager.restore(id, remotePath, timestamp);
+    return this.withTransport(id, async (transport) => {
+      await transport.writeFile(remotePath, data);
+      return { bytesWritten: data.length };
+    });
+  }
+
+  private async resolveTransport(id: string): Promise<RemoteTransport> {
+    const profiles = await this.deps.profileStore.list();
+    const profile = profiles.find((p) => p.id === id);
+    if (!profile) throw new Error(`profile not found: ${id}`);
+    const secrets = (await this.deps.secretStore.getSecrets(id)) ?? {};
+    return this.deps.createTransport(profile, secrets);
+  }
+
+  private async withTransport<T>(
+    id: string,
+    fn: (transport: RemoteTransport) => Promise<T>,
+  ): Promise<T> {
+    const transport = await this.resolveTransport(id);
+    await transport.connect();
+    try {
+      return await fn(transport);
+    } finally {
+      await transport.disconnect();
+    }
+  }
+}

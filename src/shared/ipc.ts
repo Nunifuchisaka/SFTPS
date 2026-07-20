@@ -1,0 +1,50 @@
+import type { Profile } from '../core/profile/index';
+import type { RemoteEntry } from '../core/transport/index';
+import type { UploadPreview, CommitResult } from '../core/upload/index';
+import type { BackupInfo } from '../core/backup/index';
+
+export interface ConnectionResult {
+  ok: boolean;
+  error?: string;
+}
+
+/** IPC チャンネル名。preload と main で共有する。 */
+export const IPC = {
+  listProfiles: 'profiles:list',
+  saveProfile: 'profiles:save',
+  deleteProfile: 'profiles:delete',
+  testConnection: 'conn:test',
+  listRemote: 'remote:list',
+  prepareUpload: 'upload:prepare',
+  commitUpload: 'upload:commit',
+  download: 'remote:download',
+  listBackups: 'backup:list',
+  restoreBackup: 'backup:restore',
+  isSecretStorageAvailable: 'secret:available',
+  listLocal: 'local:list',
+  homeDir: 'local:home',
+  pickFile: 'dialog:pickFile',
+  pickSavePath: 'dialog:pickSave',
+} as const;
+
+/**
+ * レンダラの window.api として公開される型付き API。
+ * preload が実装し、main の ipcMain.handle が処理する。
+ */
+export interface SftpsApi {
+  listProfiles(): Promise<Profile[]>;
+  saveProfile(input: Profile): Promise<Profile>;
+  deleteProfile(id: string): Promise<void>;
+  testConnection(id: string): Promise<ConnectionResult>;
+  listRemote(id: string, remoteDir: string): Promise<RemoteEntry[]>;
+  prepareUpload(id: string, localPath: string, remotePath: string): Promise<UploadPreview>;
+  commitUpload(id: string, localPath: string, remotePath: string): Promise<CommitResult>;
+  download(id: string, remotePath: string, savePath: string): Promise<{ bytesWritten: number }>;
+  listBackups(id: string, remotePath: string): Promise<BackupInfo[]>;
+  restoreBackup(id: string, remotePath: string, timestamp?: Date): Promise<{ bytesWritten: number }>;
+  isSecretStorageAvailable(): Promise<boolean>;
+  listLocal(dir: string): Promise<RemoteEntry[]>;
+  homeDir(): Promise<string>;
+  pickFile(): Promise<string | null>;
+  pickSavePath(defaultName: string): Promise<string | null>;
+}

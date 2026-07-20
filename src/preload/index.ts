@@ -1,0 +1,26 @@
+import { contextBridge, ipcRenderer } from 'electron';
+import { IPC, type SftpsApi } from '../shared/ipc';
+
+const api: SftpsApi = {
+  listProfiles: () => ipcRenderer.invoke(IPC.listProfiles),
+  saveProfile: (input) => ipcRenderer.invoke(IPC.saveProfile, input),
+  deleteProfile: (id) => ipcRenderer.invoke(IPC.deleteProfile, id),
+  testConnection: (id) => ipcRenderer.invoke(IPC.testConnection, id),
+  listRemote: (id, remoteDir) => ipcRenderer.invoke(IPC.listRemote, id, remoteDir),
+  prepareUpload: (id, localPath, remotePath) =>
+    ipcRenderer.invoke(IPC.prepareUpload, id, localPath, remotePath),
+  commitUpload: (id, localPath, remotePath) =>
+    ipcRenderer.invoke(IPC.commitUpload, id, localPath, remotePath),
+  download: (id, remotePath, savePath) =>
+    ipcRenderer.invoke(IPC.download, id, remotePath, savePath),
+  listBackups: (id, remotePath) => ipcRenderer.invoke(IPC.listBackups, id, remotePath),
+  restoreBackup: (id, remotePath, timestamp) =>
+    ipcRenderer.invoke(IPC.restoreBackup, id, remotePath, timestamp),
+  isSecretStorageAvailable: () => ipcRenderer.invoke(IPC.isSecretStorageAvailable),
+  listLocal: (dir) => ipcRenderer.invoke(IPC.listLocal, dir),
+  homeDir: () => ipcRenderer.invoke(IPC.homeDir),
+  pickFile: () => ipcRenderer.invoke(IPC.pickFile),
+  pickSavePath: (defaultName) => ipcRenderer.invoke(IPC.pickSavePath, defaultName),
+};
+
+contextBridge.exposeInMainWorld('api', api);

@@ -1,0 +1,80 @@
+import { describe, it, expect } from 'vitest';
+import { FtpTransport, SftpTransport, S3Transport } from '../core/transport/index';
+import type { FtpClientLike, SftpClientLike, S3ClientLike } from '../core/transport/index';
+import type { FtpProfile, SftpProfile, S3Profile } from '../core/profile/index';
+import {
+  createTransport,
+  buildFtpAccessOptions,
+  buildSftpConnectConfig,
+  buildS3ClientConfig,
+  type TransportFactoryDeps,
+} from './transport-factory';
+
+const ftpProfile: FtpProfile = {
+  id: 'f', name: 'ftp', protocol: 'ftp', host: 'h', port: 21, user: 'u', secure: true,
+};
+const sftpProfile: SftpProfile = {
+  id: 's', name: 'sftp', protocol: 'sftp', host: 'h', port: 22, user: 'u',
+};
+const s3Profile: S3Profile = {
+  id: 'a', name: 's3', protocol: 's3', region: 'ap-northeast-1', bucket: 'my-bucket', accessKeyId: 'AKIA',
+};
+
+function makeDeps(): { deps: TransportFactoryDeps; s3Configs: unknown[] } {
+  const s3Configs: unknown[] = [];
+  const deps: TransportFactoryDeps = {
+    createFtpClient: () => ({}) as unknown as FtpClientLike,
+    createSftpClient: () => ({}) as unknown as SftpClientLike,
+    createS3Client: (config) => {
+      s3Configs.push(config);
+      return {} as unknown as S3ClientLike;
+    },
+  };
+  return { deps, s3Configs };
+}
+
+describe('config builders', () => {
+  it('buildFtpAccessOptions maps the password from secrets', () => {
+    const opts = buildFtpAccessOptions(ftpProfile, { password: 'pw' });
+    expect(opts).toEqual({ host: 'h', port: 21, user: 'u', password: 'pw', secure: true });
+  });
+
+  it('buildSftpConnectConfig maps key/passphrase from secrets and username from profile', () => {
+    const cfg = buildSftpConnectConfig(sftpProfile, { privateKey: 'KEY', passphrase: 'pp' });
+    expect(cfg).toEqual({ host: 'h', port: 22, username: 'u', privateKey: 'KEY', passphrase: 'pp' });
+  });
+
+  it('buildS3ClientConfig includes credentials when the secret is present', () => {
+    const cfg = buildS3ClientConfig(s3Profile, { secretAccessKey: 'sk' });
+    expect(cfg).toEqual({
+      region: 'ap-northeast-1',
+      credentials: { accessKeyId: 'AKIA', secretAccessKey: 'sk' },
+    });
+  });
+
+  it('buildS3ClientConfig omits credentials when the secret is missing', () => {
+    const cfg = buildS3ClientConfig(s3Profile, {});
+    expect(cfg).toEqual({ region: 'ap-northeast-1' });
+  });
+});
+
+describe('createTransport', () => {
+  it('returns an FtpTransport for ftp profiles', () => {
+    const { deps } = makeDeps();
+    expect(createTransport(ftpProfile, { password: 'pw' }, deps)).toBeInstanceOf(FtpTransport);
+  });
+
+  it('returns an SftpTransport for sftp profiles', () => {
+    const { deps } = makeDeps();
+    expect(createTransport(sftpProfile, { privateKey: 'KEY' }, deps)).toBeInstanceOf(SftpTransport);
+  });
+
+  it('returns an S3Transport and passes credentials into the client config', () => {
+    const { deps, s3Configs } = makeDeps();
+    const t = createTransport(s3Profile, { secretAccessKey: 'sk' }, deps);
+    expect(t).toBeInstanceOf(S3Transport);
+    expect(s3Configs).toEqual([
+      { region: 'ap-northeast-1', credentials: { accessKeyId: 'AKIA', secretAccessKey: 'sk' } },
+    ]);
+  });
+});

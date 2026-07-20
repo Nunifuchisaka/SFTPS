@@ -1,0 +1,90 @@
+import { readFile } from 'node:fs/promises';
+import type { RemoteTransport } from '../transport/types';
+import type { BackupManager } from '../backup/index';
+import { diffContent, isBinary, type DiffSegment, type DiffSummary } from '../diff/index';
+
+export interface UploadPreview {
+  localPath: string;
+  remotePath: string;
+  /** リモートに既存ファイルがない（新規アップロード）か。 */
+  isNew: boolean;
+  binary: boolean;
+  /** アップロード予定（ローカル）のバイト数。 */
+  afterSize: number;
+  /** リモート既存ファイルのバイト数。新規なら undefined。 */
+  beforeSize?: number;
+  /** テキスト差分セグメント。バイナリまたは新規なら undefined。 */
+  segments?: DiffSegment[];
+  /** テキスト差分サマリ。バイナリまたは新規なら undefined。 */
+  summary?: DiffSummary;
+}
+
+export interface CommitResult {
+  /** 取得したバックアップの絶対パス。新規で取得しなかった場合は null。 */
+  backupPath: string | null;
+  bytesWritten: number;
+}
+
+/**
+ * アップロードのプレビューを作成する。
+ * リモートに既存ファイルがあれば取得して差分を計算し、
+ * バイナリならサイズ情報のみに落とす。
+ */
+export async function prepareUpload(
+  transport: RemoteTransport,
+  localPath: string,
+  remotePath: string,
+): Promise<UploadPreview> {
+  const localData = await readFile(localPath);
+
+  if (!(await transport.exists(remotePath))) {
+    return {
+      localPath,
+      remotePath,
+      isNew: true,
+      binary: isBinary(localData),
+      afterSize: localData.length,
+    };
+  }
+
+  const remoteData = await transport.readFile(remotePath);
+  const result = diffContent(remoteData, localData);
+
+  if (result.binary) {
+    return {
+      localPath,
+      remotePath,
+      isNew: false,
+      binary: true,
+      beforeSize: remoteData.length,
+      afterSize: localData.length,
+    };
+  }
+
+  return {
+    localPath,
+    remotePath,
+    isNew: false,
+    binary: false,
+    beforeSize: remoteData.length,
+    afterSize: localData.length,
+    segments: result.segments,
+    summary: result.summary,
+  };
+}
+
+/**
+ * アップロードを確定する。既存リモートファイルをバックアップしてから上書きする。
+ */
+export async function commitUpload(
+  transport: RemoteTransport,
+  backupManager: BackupManager,
+  profileId: string,
+  localPath: string,
+  remotePath: string,
+): Promise<CommitResult> {
+  const backupPath = await backupManager.backupExisting(transport, profileId, remotePath);
+  const data = await readFile(localPath);
+  await transport.writeFile(remotePath, data);
+  return { backupPath, bytesWritten: data.length };
+}

@@ -1,0 +1,8 @@
+# リポジトリ内は常にLFで管理する
+* text=auto eol=lf
+
+# バイナリ拡張子は変換しない
+*.png binary
+*.jpg binary
+*.ico binary
+*.icns binary

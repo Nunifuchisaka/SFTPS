@@ -1,0 +1,31 @@
+appId: com.nunifuchisaka.sftps
+productName: SFTPS
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**
+  - package.json
+# ssh2 は純JSにフォールバック可能なため native リビルドは行わない。
+npmRebuild: false
+asarUnpack:
+  - "**/node_modules/ssh2/**"
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+    - target: zip
+      arch:
+        - x64
+        - arm64
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
