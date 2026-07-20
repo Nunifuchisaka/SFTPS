@@ -269,6 +269,50 @@ textarea.form_1__input {
   color: #ffa198;
 }
 
+/* ---- transfer queue ---- */
+.queue_1 {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.queue_1__bar {
+  height: 8px;
+  background: #1c1d22;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.queue_1__barfill {
+  height: 100%;
+  background: var(--accent);
+  width: 0;
+  transition: width 0.2s ease;
+}
+
+.list_1__item.is_running {
+  color: #79c0ff;
+}
+
+.list_1__item.is_succeeded {
+  color: #7ee787;
+}
+
+.list_1__item.is_failed {
+  color: #ffa198;
+}
+
+.list_1__item.is_retrying {
+  color: #f0c674;
+}
+
+.list_1__item.is_canceled {
+  color: var(--muted);
+}
+
 .status_1 {
   position: sticky;
   bottom: 0;

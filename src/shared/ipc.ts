@@ -3,10 +3,29 @@ import type { RemoteEntry } from '../core/transport/index';
 import type { UploadPreview, CommitResult } from '../core/upload/index';
 import type { BackupInfo } from '../core/backup/index';
 import type { CompareBy, PlanSummary, RunSyncResult, SyncAction } from '../core/sync/index';
+import type { OverallProgress, TransferTask } from '../core/queue/index';
 
 export interface ConnectionResult {
   ok: boolean;
   error?: string;
+}
+
+/** キューへ投入する転送リクエスト（kind で判別）。 */
+export type TransferRequest =
+  | { kind: 'upload'; profileId: string; localPath: string; remotePath: string; label?: string }
+  | { kind: 'download'; profileId: string; remotePath: string; savePath: string; label?: string }
+  | {
+      kind: 'sync';
+      profileId: string;
+      localDir: string;
+      remoteDir: string;
+      options?: SyncFolderOptions;
+      label?: string;
+    };
+
+export interface QueueStatus {
+  tasks: TransferTask[];
+  overall: OverallProgress;
 }
 
 export interface SyncFolderOptions {
@@ -36,6 +55,9 @@ export const IPC = {
   commitUpload: 'upload:commit',
   prepareSync: 'sync:prepare',
   commitSync: 'sync:commit',
+  enqueueTransfer: 'queue:enqueue',
+  queueStatus: 'queue:status',
+  cancelAllTasks: 'queue:cancelAll',
   download: 'remote:download',
   listBackups: 'backup:list',
   restoreBackup: 'backup:restore',
@@ -71,6 +93,9 @@ export interface SftpsApi {
     remoteDir: string,
     options?: SyncFolderOptions,
   ): Promise<CommitSyncResult>;
+  enqueueTransfer(request: TransferRequest): Promise<string>;
+  queueStatus(): Promise<QueueStatus>;
+  cancelAllTasks(): Promise<void>;
   download(id: string, remotePath: string, savePath: string): Promise<{ bytesWritten: number }>;
   listBackups(id: string, remotePath: string): Promise<BackupInfo[]>;
   restoreBackup(id: string, remotePath: string, timestamp?: Date): Promise<{ bytesWritten: number }>;

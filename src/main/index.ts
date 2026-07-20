@@ -7,6 +7,7 @@ import { ProfileStore } from './profile-store';
 import { SecretStore } from './secret-store';
 import { createTransport, defaultTransportDeps, type TransportFactoryDeps } from './transport-factory';
 import { KnownHostsFile } from './known-hosts-store';
+import { createAppTransferQueue } from './transfer-queue-factory';
 import { registerIpc } from './ipc/register';
 
 async function createService(): Promise<AppService> {
@@ -62,7 +63,8 @@ function createWindow(): void {
 }
 
 void app.whenReady().then(async () => {
-  registerIpc(await createService());
+  const service = await createService();
+  registerIpc(service, createAppTransferQueue(service));
   createWindow();
 
   app.on('activate', () => {

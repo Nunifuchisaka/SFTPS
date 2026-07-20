@@ -2,7 +2,7 @@ import type { Profile, Protocol } from '../core/profile/index';
 import type { RemoteEntry } from '../core/transport/index';
 import type { BackupInfo } from '../core/backup/index';
 import type { CompareBy } from '../core/sync/index';
-import type { SyncFolderOptions } from '../shared/ipc';
+import type { QueueStatus, SyncFolderOptions } from '../shared/ipc';
 import { createDiffView } from './diff-view';
 import { createSyncPlanView } from './sync-view';
 import {
@@ -80,6 +80,7 @@ export function mountApp(root: string | HTMLElement): void {
   const backupPanel = h('div', { class: 'backup_1' });
   const syncPanel = h('div', { class: 'sync_1' });
   const syncPlanPanel = h('div', { class: 'diffwrap_1' });
+  const queuePanel = h('div', { class: 'queue_1' });
 
   function setStatus(msg: string, isError = false): void {
     statusBar.textContent = msg;
@@ -393,7 +394,20 @@ export function mountApp(root: string | HTMLElement): void {
       ['差分プレビュー'],
     );
 
-    transferPanel.append(localLabel, pickBtn, h('label', {}, ['先: ', remoteIn]), previewBtn, diffPanel);
+    const enqueueBtn = h(
+      'button',
+      { class: 'btn_1', onclick: () => void enqueueUpload(remoteIn.value.trim()) },
+      ['キューに追加'],
+    );
+
+    transferPanel.append(
+      localLabel,
+      pickBtn,
+      h('label', {}, ['先: ', remoteIn]),
+      previewBtn,
+      enqueueBtn,
+      diffPanel,
+    );
   }
 
   async function pickLocalFile(): Promise<void> {
@@ -532,6 +546,9 @@ export function mountApp(root: string | HTMLElement): void {
         { class: 'btn_1 btn_1--primary', onclick: () => void runSyncNow(remoteIn.value.trim(), opts()) },
         ['同期実行'],
       ),
+      h('button', { class: 'btn_1', onclick: () => void enqueueSync(remoteIn.value.trim(), opts()) }, [
+        'キューで同期',
+      ]),
       syncPlanPanel,
     );
   }
@@ -573,6 +590,79 @@ export function mountApp(root: string | HTMLElement): void {
     }
   }
 
+  // ---- transfer queue -------------------------------------------------------
+  async function enqueueUpload(remotePath: string): Promise<void> {
+    if (!state.currentProfileId || !state.selectedLocal || !remotePath) {
+      setStatus('プロファイル・ローカルファイル・リモートパスが必要です', true);
+      return;
+    }
+    await api.enqueueTransfer({
+      kind: 'upload',
+      profileId: state.currentProfileId,
+      localPath: state.selectedLocal,
+      remotePath,
+      label: basename(state.selectedLocal),
+    });
+    setStatus('アップロードをキューに追加しました');
+    await refreshQueue();
+  }
+
+  async function enqueueSync(remoteDir: string, options: SyncFolderOptions): Promise<void> {
+    if (!state.currentProfileId || !state.syncLocalDir) {
+      setStatus('プロファイルとローカルフォルダが必要です', true);
+      return;
+    }
+    await api.enqueueTransfer({
+      kind: 'sync',
+      profileId: state.currentProfileId,
+      localDir: state.syncLocalDir,
+      remoteDir,
+      options,
+      label: `sync → ${remoteDir}`,
+    });
+    setStatus('フォルダ同期をキューに追加しました');
+    await refreshQueue();
+  }
+
+  async function refreshQueue(): Promise<void> {
+    const status = await api.queueStatus();
+    renderQueue(status);
+  }
+
+  function renderQueue(status: QueueStatus): void {
+    queuePanel.replaceChildren();
+    queuePanel.append(h('h2', {}, ['転送キュー']));
+
+    const pct = Math.round(status.overall.ratio * 100);
+    const fill = h('div', { class: 'queue_1__barfill' });
+    fill.style.width = `${pct}%`;
+    queuePanel.append(h('div', { class: 'queue_1__bar' }, [fill]), h('div', {}, [`全体 ${pct}%`]));
+
+    const list = h('ul', { class: 'list_1' });
+    for (const t of status.tasks) {
+      list.append(
+        h('li', { class: `list_1__item is_${t.status}` }, [
+          h('span', { class: 'list_1__label' }, [
+            `[${t.kind}] ${t.label ?? t.id} — ${t.status}` + (t.attempts > 1 ? `（試行${t.attempts}）` : ''),
+          ]),
+        ]),
+      );
+    }
+    queuePanel.append(list);
+    queuePanel.append(
+      h(
+        'button',
+        {
+          class: 'btn_1',
+          onclick: () => {
+            void api.cancelAllTasks().then(() => refreshQueue());
+          },
+        },
+        ['全キャンセル'],
+      ),
+    );
+  }
+
   // ---- boot -----------------------------------------------------------------
   container.replaceChildren(
     h('header', { class: 'header_1' }, [h('h1', {}, ['SFTPS — FTP / SFTP / S3 クライアント'])]),
@@ -580,7 +670,7 @@ export function mountApp(root: string | HTMLElement): void {
     h('main', { class: 'layout_1' }, [
       h('section', { class: 'layout_1__col' }, [profilePanel]),
       h('section', { class: 'layout_1__col' }, [localPanel, remotePanel]),
-      h('section', { class: 'layout_1__col' }, [transferPanel, syncPanel, backupPanel]),
+      h('section', { class: 'layout_1__col' }, [transferPanel, syncPanel, backupPanel, queuePanel]),
     ]),
     statusBar,
   );
@@ -597,5 +687,7 @@ export function mountApp(root: string | HTMLElement): void {
     await refreshProfiles();
     renderTransfer();
     renderSync();
+    await refreshQueue();
+    window.setInterval(() => void refreshQueue(), 1500);
   })();
 }

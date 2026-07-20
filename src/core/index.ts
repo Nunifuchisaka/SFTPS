@@ -5,3 +5,4 @@ export * from './profile/index';
 export * from './upload/index';
 export * from './hostkey/index';
 export * from './sync/index';
+export * from './queue/index';

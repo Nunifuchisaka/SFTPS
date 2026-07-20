@@ -15,6 +15,9 @@ const api: SftpsApi = {
     ipcRenderer.invoke(IPC.prepareSync, id, localDir, remoteDir, options),
   commitSync: (id, localDir, remoteDir, options) =>
     ipcRenderer.invoke(IPC.commitSync, id, localDir, remoteDir, options),
+  enqueueTransfer: (request) => ipcRenderer.invoke(IPC.enqueueTransfer, request),
+  queueStatus: () => ipcRenderer.invoke(IPC.queueStatus),
+  cancelAllTasks: () => ipcRenderer.invoke(IPC.cancelAllTasks),
   download: (id, remotePath, savePath) =>
     ipcRenderer.invoke(IPC.download, id, remotePath, savePath),
   listBackups: (id, remotePath) => ipcRenderer.invoke(IPC.listBackups, id, remotePath),

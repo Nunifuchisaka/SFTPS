@@ -1,12 +1,38 @@
 import { ipcMain, dialog, safeStorage } from 'electron';
 import { homedir } from 'node:os';
-import { IPC, type SyncFolderOptions } from '../../shared/ipc';
+import { IPC, type SyncFolderOptions, type TransferRequest } from '../../shared/ipc';
 import type { Profile } from '../../core/profile/index';
+import type { TransferQueue } from '../../core/queue/index';
 import type { AppService } from '../app-service';
 import { listLocalDir } from '../local-fs';
 
 /** AppService のメソッドを ipcMain.handle に結線する。ここはロジックを持たない薄い層。 */
-export function registerIpc(service: AppService): void {
+export function registerIpc(service: AppService, queue: TransferQueue): void {
+  // キューは run() 実行中に新規タスクを拾わないため、投入のたびに
+  // 「未処理が無くなるまで run を回す」ドライバで駆動する。
+  let draining = false;
+  const drive = async (): Promise<void> => {
+    if (draining) return;
+    draining = true;
+    try {
+      while (queue.list().some((t) => t.status === 'queued')) {
+        await queue.run();
+      }
+    } finally {
+      draining = false;
+    }
+  };
+
+  let seq = 0;
+  ipcMain.handle(IPC.enqueueTransfer, (_e, request: TransferRequest) => {
+    const id = `t${Date.now()}-${seq++}`;
+    queue.add({ id, kind: request.kind, label: request.label, payload: request });
+    void drive();
+    return id;
+  });
+  ipcMain.handle(IPC.queueStatus, () => ({ tasks: queue.list(), overall: queue.overall() }));
+  ipcMain.handle(IPC.cancelAllTasks, () => queue.cancelAll());
+
   ipcMain.handle(IPC.listProfiles, () => service.listProfiles());
   ipcMain.handle(IPC.saveProfile, (_e, input: Profile) => service.saveProfile(input));
   ipcMain.handle(IPC.deleteProfile, (_e, id: string) => service.deleteProfile(id));
