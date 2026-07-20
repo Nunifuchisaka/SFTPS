@@ -1,19 +1,42 @@
 import { app, BrowserWindow, safeStorage } from 'electron';
 import { join } from 'node:path';
 import { BackupManager } from '../core/backup/index';
+import { createHostVerifier, sha256Fingerprint } from '../core/hostkey/index';
 import { AppService } from './app-service';
 import { ProfileStore } from './profile-store';
 import { SecretStore } from './secret-store';
-import { createTransport } from './transport-factory';
+import { createTransport, defaultTransportDeps, type TransportFactoryDeps } from './transport-factory';
+import { KnownHostsFile } from './known-hosts-store';
 import { registerIpc } from './ipc/register';
 
-function createService(): AppService {
+async function createService(): Promise<AppService> {
   const userData = app.getPath('userData');
+
+  // ホスト鍵検証（known_hosts）: 起動時に読み込み、新規鍵受理時に追記保存する。
+  const knownHostsFile = new KnownHostsFile(join(userData, 'known_hosts.json'));
+  const knownHosts = await knownHostsFile.load();
+
+  const deps: TransportFactoryDeps = {
+    ...defaultTransportDeps,
+    makeSftpHostVerifier: (profile) =>
+      createHostVerifier({
+        host: profile.host,
+        port: profile.port,
+        policy: profile.hostKeyPolicy ?? 'tofu',
+        fingerprintOf: sha256Fingerprint,
+        verify: (h, p, fp) => knownHosts.verify(h, p, fp),
+        onAccept: (h, p, fp) => {
+          knownHosts.add(h, p, fp);
+          void knownHostsFile.save(knownHosts);
+        },
+      }),
+  };
+
   return new AppService({
     profileStore: new ProfileStore(join(userData, 'profiles.json')),
     secretStore: new SecretStore({ safeStorage, filePath: join(userData, 'secrets.json') }),
     backupManager: new BackupManager({ backupRoot: join(userData, 'backups') }),
-    createTransport: (profile, secrets) => createTransport(profile, secrets),
+    createTransport: (profile, secrets) => createTransport(profile, secrets, deps),
   });
 }
 
@@ -38,8 +61,8 @@ function createWindow(): void {
   }
 }
 
-void app.whenReady().then(() => {
-  registerIpc(createService());
+void app.whenReady().then(async () => {
+  registerIpc(await createService());
   createWindow();
 
   app.on('activate', () => {

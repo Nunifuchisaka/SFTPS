@@ -11,6 +11,7 @@ import {
   type RemoteTransport,
 } from '../core/transport/index';
 import type { FtpProfile, Profile, S3Profile, SftpProfile } from '../core/profile/index';
+import type { HostVerifierFn } from '../core/hostkey/index';
 
 export type Secrets = Record<string, string>;
 
@@ -28,6 +29,8 @@ export interface TransportFactoryDeps {
   createFtpClient(): FtpClientLike;
   createSftpClient(): SftpClientLike;
   createS3Client(config: S3ClientConfig): S3ClientLike;
+  /** SFTP プロファイルに対するホスト鍵検証関数を生成する（未指定なら検証なし）。 */
+  makeSftpHostVerifier?: (profile: SftpProfile) => HostVerifierFn;
 }
 
 /** basic-ftp の access() へ渡す接続オプションを組み立てる。 */
@@ -42,7 +45,11 @@ export function buildFtpAccessOptions(profile: FtpProfile, secrets: Secrets) {
 }
 
 /** ssh2-sftp-client の connect() へ渡す設定を組み立てる。 */
-export function buildSftpConnectConfig(profile: SftpProfile, secrets: Secrets) {
+export function buildSftpConnectConfig(
+  profile: SftpProfile,
+  secrets: Secrets,
+  hostVerifier?: HostVerifierFn,
+) {
   const config: Record<string, unknown> = {
     host: profile.host,
     port: profile.port,
@@ -51,6 +58,7 @@ export function buildSftpConnectConfig(profile: SftpProfile, secrets: Secrets) {
   if (secrets.password) config.password = secrets.password;
   if (secrets.privateKey) config.privateKey = secrets.privateKey;
   if (secrets.passphrase) config.passphrase = secrets.passphrase;
+  if (hostVerifier) config.hostVerifier = hostVerifier;
   return config;
 }
 
@@ -92,8 +100,13 @@ export function createTransport(
   switch (profile.protocol) {
     case 'ftp':
       return new FtpTransport(deps.createFtpClient(), buildFtpAccessOptions(profile, secrets));
-    case 'sftp':
-      return new SftpTransport(deps.createSftpClient(), buildSftpConnectConfig(profile, secrets));
+    case 'sftp': {
+      const hostVerifier = deps.makeSftpHostVerifier?.(profile);
+      return new SftpTransport(
+        deps.createSftpClient(),
+        buildSftpConnectConfig(profile, secrets, hostVerifier),
+      );
+    }
     case 's3':
       return new S3Transport(
         deps.createS3Client(buildS3ClientConfig(profile, secrets)),

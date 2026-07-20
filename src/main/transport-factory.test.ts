@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { FtpTransport, SftpTransport, S3Transport } from '../core/transport/index';
 import type { FtpClientLike, SftpClientLike, S3ClientLike } from '../core/transport/index';
 import type { FtpProfile, SftpProfile, S3Profile } from '../core/profile/index';
+import type { HostVerifierFn } from '../core/hostkey/index';
 import {
   createTransport,
   buildFtpAccessOptions,
@@ -44,6 +45,16 @@ describe('config builders', () => {
     expect(cfg).toEqual({ host: 'h', port: 22, username: 'u', privateKey: 'KEY', passphrase: 'pp' });
   });
 
+  it('buildSftpConnectConfig includes hostVerifier when provided, and omits it otherwise', () => {
+    const hv: HostVerifierFn = (_key, cb) => cb(true);
+    const withHv = buildSftpConnectConfig(sftpProfile, { password: 'pw' }, hv);
+    expect((withHv as Record<string, unknown>).hostVerifier).toBe(hv);
+    expect((withHv as Record<string, unknown>).password).toBe('pw');
+
+    const withoutHv = buildSftpConnectConfig(sftpProfile, { password: 'pw' });
+    expect('hostVerifier' in withoutHv).toBe(false);
+  });
+
   it('buildS3ClientConfig includes credentials when the secret is present', () => {
     const cfg = buildS3ClientConfig(s3Profile, { secretAccessKey: 'sk' });
     expect(cfg).toEqual({
@@ -67,6 +78,18 @@ describe('createTransport', () => {
   it('returns an SftpTransport for sftp profiles', () => {
     const { deps } = makeDeps();
     expect(createTransport(sftpProfile, { privateKey: 'KEY' }, deps)).toBeInstanceOf(SftpTransport);
+  });
+
+  it('asks deps.makeSftpHostVerifier for a verifier for sftp profiles', () => {
+    const { deps } = makeDeps();
+    const seen: SftpProfile[] = [];
+    const hv: HostVerifierFn = (_key, cb) => cb(true);
+    deps.makeSftpHostVerifier = (profile) => {
+      seen.push(profile);
+      return hv;
+    };
+    createTransport(sftpProfile, { privateKey: 'KEY' }, deps);
+    expect(seen).toEqual([sftpProfile]);
   });
 
   it('returns an S3Transport and passes credentials into the client config', () => {

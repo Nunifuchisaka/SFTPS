@@ -19,6 +19,8 @@ export interface SftpProfile {
   host: string;
   port: number;
   user: string;
+  /** ホスト鍵検証ポリシー。tofu=初回信頼して記録 / strict=既知の鍵のみ受理。既定 tofu。 */
+  hostKeyPolicy?: 'tofu' | 'strict';
   /** シークレット（JSON へは保存しない）。 */
   password?: string;
   /** シークレット（JSON へは保存しない）。 */
@@ -75,6 +77,14 @@ export function validateProfile(profile: Profile): string[] {
         errors.push('port must be an integer between 1 and 65535');
       }
       if (!profile.user?.trim()) errors.push('user is required');
+      if (
+        profile.protocol === 'sftp' &&
+        profile.hostKeyPolicy !== undefined &&
+        profile.hostKeyPolicy !== 'tofu' &&
+        profile.hostKeyPolicy !== 'strict'
+      ) {
+        errors.push('hostKeyPolicy must be "tofu" or "strict"');
+      }
       break;
     case 's3':
       if (!profile.region?.trim()) errors.push('region is required');

@@ -59,6 +59,16 @@ describe('validateProfile', () => {
     expect(validateProfile({ ...validFtp, port: 70000 }).some((e) => /port/.test(e))).toBe(true);
   });
 
+  it('accepts an sftp profile with a valid hostKeyPolicy', () => {
+    expect(validateProfile({ ...validSftp, hostKeyPolicy: 'strict' })).toEqual([]);
+    expect(validateProfile({ ...validSftp, hostKeyPolicy: 'tofu' })).toEqual([]);
+  });
+
+  it('rejects an sftp profile with an unknown hostKeyPolicy', () => {
+    const bad = { ...validSftp, hostKeyPolicy: 'bogus' } as unknown as SftpProfile;
+    expect(validateProfile(bad).some((e) => /hostKeyPolicy/.test(e))).toBe(true);
+  });
+
   it('rejects invalid S3 bucket names', () => {
     expect(validateProfile({ ...validS3, bucket: 'Ab' }).length).toBeGreaterThan(0); // 大文字・短すぎ
     expect(validateProfile({ ...validS3, bucket: 'has..dots' }).length).toBeGreaterThan(0); // 連続ドット

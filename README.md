@@ -8,13 +8,14 @@ FTP / SFTP / Amazon S3 に対応した、クロスプラットフォーム（Win
 - **一文字単位の差分ビュー**: アップロード前にローカルとリモートの差分を文字単位で色分け表示（追加=緑 / 削除=赤）。追加/削除文字数のサマリ付き。バイナリはサイズ比較に自動フォールバック
 - **上書き前バックアップ**: 既存リモートファイルを上書きする前に自動でローカルへ退避。世代ローテーションと履歴からの復元に対応
 - **安全なシークレット保管**: パスワード・秘密鍵・AWS シークレットは OS の暗号化（Windows: DPAPI / macOS: Keychain）を使う Electron `safeStorage` で暗号化して保存。プロファイル JSON には平文シークレットを一切書かない
+- **SFTP ホスト鍵検証（known_hosts）**: SFTP 接続時にサーバーのホスト鍵フィンガープリント（`SHA256:...`）を検証。既定は TOFU（初回のみ信頼して記録）、`strict` ポリシーでは既知の鍵のみ受理。鍵の不一致（MITM の疑い）は常に拒否。信頼済みの鍵は `userData/known_hosts.json` に保存
 
 ## 対応プロトコルと接続情報
 
 | プロトコル | 必須項目 | シークレット（暗号化保存） |
 |---|---|---|
 | FTP / FTPS | host, port, user, secure | password |
-| SFTP | host, port, user | password / privateKey / passphrase |
+| SFTP | host, port, user（任意: hostKeyPolicy = tofu / strict） | password / privateKey / passphrase |
 | S3 | region, bucket, accessKeyId | secretAccessKey / sessionToken |
 
 ## 動作要件
@@ -70,6 +71,7 @@ src/
     backup/              上書き前バックアップ・世代管理・復元
     profile/             接続プロファイル型・検証・シークレット分離
     upload/              アップロード調整役（prepare/commit）
+    hostkey/             SFTP ホスト鍵検証（フィンガープリント・known_hosts・TOFU判定）
   main/                Electron メインプロセス
     index.ts             ウィンドウ生成・ライフサイクル・DI 結線
     app-service.ts       IPC ハンドラの実体（純粋・テスト可能）
