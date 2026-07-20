@@ -1,7 +1,10 @@
 import type { FtpSecurity, Profile, Protocol } from '../core/profile/index';
 import type { RemoteEntry } from '../core/transport/index';
 import type { BackupInfo } from '../core/backup/index';
+import type { CompareBy } from '../core/sync/index';
+import type { SyncFolderOptions } from '../shared/ipc';
 import { createDiffView } from './diff-view';
+import { createSyncPlanView } from './sync-view';
 
 const api = window.api;
 
@@ -41,6 +44,7 @@ interface State {
   remoteDir: string;
   remoteEntries: RemoteEntry[];
   selectedRemote: string | null;
+  syncLocalDir: string | null;
 }
 
 export function mountApp(root: string | HTMLElement): void {
@@ -55,6 +59,7 @@ export function mountApp(root: string | HTMLElement): void {
     remoteDir: '/',
     remoteEntries: [],
     selectedRemote: null,
+    syncLocalDir: null,
   };
 
   const statusBar = h('div', { class: 'status_1' });
@@ -65,6 +70,8 @@ export function mountApp(root: string | HTMLElement): void {
   const transferPanel = h('div', { class: 'transfer_1' });
   const diffPanel = h('div', { class: 'diffwrap_1' });
   const backupPanel = h('div', { class: 'backup_1' });
+  const syncPanel = h('div', { class: 'sync_1' });
+  const syncPlanPanel = h('div', { class: 'diffwrap_1' });
 
   function setStatus(msg: string, isError = false): void {
     statusBar.textContent = msg;
@@ -436,6 +443,83 @@ export function mountApp(root: string | HTMLElement): void {
     }
   }
 
+  // ---- folder sync ----------------------------------------------------------
+  function renderSync(): void {
+    syncPanel.replaceChildren();
+    const remoteIn = h('input', {
+      class: 'form_1__input',
+      type: 'text',
+      value: state.remoteDir,
+      placeholder: '同期先リモートディレクトリ',
+    }) as HTMLInputElement;
+    const compareSel = h('select', { class: 'form_1__input' }, [
+      h('option', { value: 'size-and-mtime' }, ['サイズ+更新時刻']),
+      h('option', { value: 'size' }, ['サイズのみ']),
+      h('option', { value: 'mtime' }, ['更新時刻のみ']),
+    ]) as HTMLSelectElement;
+    const delChk = h('input', { type: 'checkbox' }) as HTMLInputElement;
+
+    const opts = (): SyncFolderOptions => ({
+      compareBy: compareSel.value as CompareBy,
+      deleteExtraneous: delChk.checked,
+    });
+
+    syncPanel.append(
+      h('h2', {}, ['フォルダ差分同期']),
+      h('div', {}, [`ローカル: ${state.syncLocalDir ?? '(未選択)'}`]),
+      h('button', { class: 'btn_1', onclick: () => void pickSyncDir() }, ['フォルダ選択...']),
+      h('label', {}, ['先: ', remoteIn]),
+      h('label', {}, ['判定: ', compareSel]),
+      h('label', {}, [delChk, ' 余剰ファイルを削除（ミラー・注意）']),
+      h('button', { class: 'btn_1', onclick: () => void planSyncNow(remoteIn.value.trim(), opts()) }, [
+        'プラン作成',
+      ]),
+      h(
+        'button',
+        { class: 'btn_1 btn_1--primary', onclick: () => void runSyncNow(remoteIn.value.trim(), opts()) },
+        ['同期実行'],
+      ),
+      syncPlanPanel,
+    );
+  }
+
+  async function pickSyncDir(): Promise<void> {
+    const picked = await api.pickDirectory();
+    if (picked) {
+      state.syncLocalDir = picked;
+      renderSync();
+    }
+  }
+
+  async function planSyncNow(remoteDir: string, options: SyncFolderOptions): Promise<void> {
+    if (!state.currentProfileId || !state.syncLocalDir) {
+      setStatus('プロファイルとローカルフォルダが必要です', true);
+      return;
+    }
+    const r = await guard('同期プラン作成', () =>
+      api.prepareSync(state.currentProfileId as string, state.syncLocalDir as string, remoteDir, options),
+    );
+    syncPlanPanel.replaceChildren();
+    if (r) syncPlanPanel.append(createSyncPlanView(r.plan, r.summary));
+  }
+
+  async function runSyncNow(remoteDir: string, options: SyncFolderOptions): Promise<void> {
+    if (!state.currentProfileId || !state.syncLocalDir) {
+      setStatus('プロファイルとローカルフォルダが必要です', true);
+      return;
+    }
+    const r = await guard('同期実行', () =>
+      api.commitSync(state.currentProfileId as string, state.syncLocalDir as string, remoteDir, options),
+    );
+    if (r) {
+      const s = r.result;
+      setStatus(
+        `同期完了: up ${s.uploaded} / dir ${s.createdDirs} / skip ${s.skipped} / del ${s.deleted}`,
+      );
+      await loadRemote(state.remoteDir);
+    }
+  }
+
   // ---- boot -----------------------------------------------------------------
   container.replaceChildren(
     h('header', { class: 'header_1' }, [h('h1', {}, ['SFTPS — FTP / SFTP / S3 クライアント'])]),
@@ -443,7 +527,7 @@ export function mountApp(root: string | HTMLElement): void {
     h('main', { class: 'layout_1' }, [
       h('section', { class: 'layout_1__col' }, [profilePanel]),
       h('section', { class: 'layout_1__col' }, [localPanel, remotePanel]),
-      h('section', { class: 'layout_1__col' }, [transferPanel, backupPanel]),
+      h('section', { class: 'layout_1__col' }, [transferPanel, syncPanel, backupPanel]),
     ]),
     statusBar,
   );
@@ -459,6 +543,7 @@ export function mountApp(root: string | HTMLElement): void {
     await loadLocal(home);
     await refreshProfiles();
     renderTransfer();
+    renderSync();
   })();
 }
 

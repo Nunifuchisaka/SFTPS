@@ -2,10 +2,27 @@ import type { Profile } from '../core/profile/index';
 import type { RemoteEntry } from '../core/transport/index';
 import type { UploadPreview, CommitResult } from '../core/upload/index';
 import type { BackupInfo } from '../core/backup/index';
+import type { CompareBy, PlanSummary, RunSyncResult, SyncAction } from '../core/sync/index';
 
 export interface ConnectionResult {
   ok: boolean;
   error?: string;
+}
+
+export interface SyncFolderOptions {
+  compareBy?: CompareBy;
+  deleteExtraneous?: boolean;
+  ignore?: string[];
+}
+
+export interface PrepareSyncResult {
+  plan: SyncAction[];
+  summary: PlanSummary;
+}
+
+export interface CommitSyncResult {
+  result: RunSyncResult;
+  summary: PlanSummary;
 }
 
 /** IPC チャンネル名。preload と main で共有する。 */
@@ -17,6 +34,8 @@ export const IPC = {
   listRemote: 'remote:list',
   prepareUpload: 'upload:prepare',
   commitUpload: 'upload:commit',
+  prepareSync: 'sync:prepare',
+  commitSync: 'sync:commit',
   download: 'remote:download',
   listBackups: 'backup:list',
   restoreBackup: 'backup:restore',
@@ -24,6 +43,7 @@ export const IPC = {
   listLocal: 'local:list',
   homeDir: 'local:home',
   pickFile: 'dialog:pickFile',
+  pickDirectory: 'dialog:pickDir',
   pickSavePath: 'dialog:pickSave',
 } as const;
 
@@ -39,6 +59,18 @@ export interface SftpsApi {
   listRemote(id: string, remoteDir: string): Promise<RemoteEntry[]>;
   prepareUpload(id: string, localPath: string, remotePath: string): Promise<UploadPreview>;
   commitUpload(id: string, localPath: string, remotePath: string): Promise<CommitResult>;
+  prepareSync(
+    id: string,
+    localDir: string,
+    remoteDir: string,
+    options?: SyncFolderOptions,
+  ): Promise<PrepareSyncResult>;
+  commitSync(
+    id: string,
+    localDir: string,
+    remoteDir: string,
+    options?: SyncFolderOptions,
+  ): Promise<CommitSyncResult>;
   download(id: string, remotePath: string, savePath: string): Promise<{ bytesWritten: number }>;
   listBackups(id: string, remotePath: string): Promise<BackupInfo[]>;
   restoreBackup(id: string, remotePath: string, timestamp?: Date): Promise<{ bytesWritten: number }>;
@@ -46,5 +78,6 @@ export interface SftpsApi {
   listLocal(dir: string): Promise<RemoteEntry[]>;
   homeDir(): Promise<string>;
   pickFile(): Promise<string | null>;
+  pickDirectory(): Promise<string | null>;
   pickSavePath(defaultName: string): Promise<string | null>;
 }

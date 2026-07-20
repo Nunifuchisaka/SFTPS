@@ -142,6 +142,30 @@ describe('AppService', () => {
     expect((await transport.readFile('/f.txt')).toString('utf8')).toBe('OLD');
   });
 
+  it('prepareSync plans without writing; commitSync applies with backups', async () => {
+    await service.saveProfile(ftpProfile);
+    const localDir = join(dir, 'localsrc');
+    await writeLocal(join(localDir, 'a.txt'), Buffer.from('NEWDATA'));
+    await writeLocal(join(localDir, 'sub', 'b.txt'), Buffer.from('bb'));
+    await transport.connect();
+    await transport.writeFile('/site/a.txt', Buffer.from('OLD'));
+
+    const prep = await service.prepareSync('p1', localDir, '/site', { compareBy: 'size' });
+    expect(prep.summary.upload).toBe(2); // a.txt(changed) + sub/b.txt(new)
+    expect(prep.summary.createDir).toBe(1); // sub
+    // dry run: nothing new written to the dest yet
+    expect(await transport.exists('/site/sub/b.txt')).toBe(false);
+
+    const commit = await service.commitSync('p1', localDir, '/site', { compareBy: 'size' });
+    expect((await transport.readFile('/site/a.txt')).toString()).toBe('NEWDATA');
+    expect((await transport.readFile('/site/sub/b.txt')).toString()).toBe('bb');
+    expect(commit.result.uploaded).toBe(2);
+    // overwrite of /site/a.txt was backed up
+    const backups = await service.listBackups('p1', '/site/a.txt');
+    expect(backups).toHaveLength(1);
+    expect((await service.restoreBackup('p1', '/site/a.txt')).bytesWritten).toBe(3);
+  });
+
   it('download writes the remote file to a local path', async () => {
     await service.saveProfile(ftpProfile);
     await transport.connect();

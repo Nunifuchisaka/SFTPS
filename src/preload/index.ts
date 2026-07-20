@@ -11,6 +11,10 @@ const api: SftpsApi = {
     ipcRenderer.invoke(IPC.prepareUpload, id, localPath, remotePath),
   commitUpload: (id, localPath, remotePath) =>
     ipcRenderer.invoke(IPC.commitUpload, id, localPath, remotePath),
+  prepareSync: (id, localDir, remoteDir, options) =>
+    ipcRenderer.invoke(IPC.prepareSync, id, localDir, remoteDir, options),
+  commitSync: (id, localDir, remoteDir, options) =>
+    ipcRenderer.invoke(IPC.commitSync, id, localDir, remoteDir, options),
   download: (id, remotePath, savePath) =>
     ipcRenderer.invoke(IPC.download, id, remotePath, savePath),
   listBackups: (id, remotePath) => ipcRenderer.invoke(IPC.listBackups, id, remotePath),
@@ -20,6 +24,7 @@ const api: SftpsApi = {
   listLocal: (dir) => ipcRenderer.invoke(IPC.listLocal, dir),
   homeDir: () => ipcRenderer.invoke(IPC.homeDir),
   pickFile: () => ipcRenderer.invoke(IPC.pickFile),
+  pickDirectory: () => ipcRenderer.invoke(IPC.pickDirectory),
   pickSavePath: (defaultName) => ipcRenderer.invoke(IPC.pickSavePath, defaultName),
 };
 

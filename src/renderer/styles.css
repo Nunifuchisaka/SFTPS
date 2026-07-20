@@ -212,6 +212,57 @@ textarea.form_1__input {
   color: var(--text);
 }
 
+/* ---- folder sync ---- */
+.sync_1 {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.sync_1 label {
+  display: block;
+  margin: 4px 0;
+}
+
+.sync_1__summary {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.sync_1__list {
+  list-style: none;
+  margin: 6px 0;
+  padding: 0;
+  max-height: 260px;
+  overflow: auto;
+  font-family: ui-monospace, Consolas, monospace;
+}
+
+.sync_1__item {
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sync_1__item.is_upload {
+  color: #7ee787;
+}
+
+.sync_1__item.is_create_dir {
+  color: #79c0ff;
+}
+
+.sync_1__item.is_skip {
+  color: var(--muted);
+}
+
+.sync_1__item.is_delete_extra {
+  color: #ffa198;
+}
+
 .status_1 {
   position: sticky;
   bottom: 0;

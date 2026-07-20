@@ -1,6 +1,6 @@
 import { ipcMain, dialog, safeStorage } from 'electron';
 import { homedir } from 'node:os';
-import { IPC } from '../../shared/ipc';
+import { IPC, type SyncFolderOptions } from '../../shared/ipc';
 import type { Profile } from '../../core/profile/index';
 import type { AppService } from '../app-service';
 import { listLocalDir } from '../local-fs';
@@ -18,6 +18,16 @@ export function registerIpc(service: AppService): void {
   ipcMain.handle(IPC.commitUpload, (_e, id: string, local: string, remote: string) =>
     service.commitUpload(id, local, remote),
   );
+  ipcMain.handle(
+    IPC.prepareSync,
+    (_e, id: string, localDir: string, remoteDir: string, options?: SyncFolderOptions) =>
+      service.prepareSync(id, localDir, remoteDir, options),
+  );
+  ipcMain.handle(
+    IPC.commitSync,
+    (_e, id: string, localDir: string, remoteDir: string, options?: SyncFolderOptions) =>
+      service.commitSync(id, localDir, remoteDir, options),
+  );
   ipcMain.handle(IPC.download, (_e, id: string, remote: string, save: string) =>
     service.download(id, remote, save),
   );
@@ -33,6 +43,10 @@ export function registerIpc(service: AppService): void {
 
   ipcMain.handle(IPC.pickFile, async () => {
     const result = await dialog.showOpenDialog({ properties: ['openFile'] });
+    return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0];
+  });
+  ipcMain.handle(IPC.pickDirectory, async () => {
+    const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });
     return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0];
   });
   ipcMain.handle(IPC.pickSavePath, async (_e, defaultName: string) => {

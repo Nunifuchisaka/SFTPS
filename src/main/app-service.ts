@@ -1,8 +1,9 @@
 import { writeFile } from 'node:fs/promises';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import type { RemoteEntry, RemoteTransport } from '../core/transport/index';
+import { LocalTransport, type RemoteEntry, type RemoteTransport } from '../core/transport/index';
 import type { BackupInfo, BackupManager } from '../core/backup/index';
+import { walkTree, planSync, summarizePlan, runSync, type SyncEntry } from '../core/sync/index';
 import {
   extractSecrets,
   stripSecrets,
@@ -18,7 +19,12 @@ import {
 import type { SecretStore } from './secret-store';
 import type { ProfileStore } from './profile-store';
 import type { Secrets } from './transport-factory';
-import type { ConnectionResult } from '../shared/ipc';
+import type {
+  ConnectionResult,
+  SyncFolderOptions,
+  PrepareSyncResult,
+  CommitSyncResult,
+} from '../shared/ipc';
 
 export interface AppServiceDeps {
   profileStore: ProfileStore;
@@ -92,6 +98,70 @@ export class AppService {
     return this.withTransport(id, (transport) =>
       coreCommitUpload(transport, this.deps.backupManager, id, localPath, remotePath),
     );
+  }
+
+  /** ローカルフォルダとリモートディレクトリの差分同期プランを算出する（書き込みなし）。 */
+  async prepareSync(
+    id: string,
+    localDir: string,
+    remoteDir: string,
+    options: SyncFolderOptions = {},
+  ): Promise<PrepareSyncResult> {
+    return this.withTransport(id, async (dest) => {
+      const source = await this.openLocalSource(localDir);
+      const sourceEntries = await walkTree(source, '/', { ignore: options.ignore });
+      const destEntries = await this.safeWalk(dest, remoteDir, options.ignore);
+      const plan = planSync(sourceEntries, destEntries, {
+        compareBy: options.compareBy,
+        deleteExtraneous: options.deleteExtraneous,
+      });
+      return { plan, summary: summarizePlan(plan) };
+    });
+  }
+
+  /** ローカルフォルダをリモートディレクトリへ差分同期する（上書きは事前バックアップ）。 */
+  async commitSync(
+    id: string,
+    localDir: string,
+    remoteDir: string,
+    options: SyncFolderOptions = {},
+  ): Promise<CommitSyncResult> {
+    return this.withTransport(id, async (dest) => {
+      const source = await this.openLocalSource(localDir);
+      await dest.mkdir(remoteDir);
+      const sourceEntries = await walkTree(source, '/', { ignore: options.ignore });
+      const destEntries = await this.safeWalk(dest, remoteDir, options.ignore);
+      const plan = planSync(sourceEntries, destEntries, {
+        compareBy: options.compareBy,
+        deleteExtraneous: options.deleteExtraneous,
+      });
+      const result = await runSync(source, dest, plan, {
+        backupManager: this.deps.backupManager,
+        profileId: id,
+        sourceBase: '/',
+        destBase: remoteDir,
+      });
+      return { result, summary: summarizePlan(plan) };
+    });
+  }
+
+  private async openLocalSource(localDir: string): Promise<LocalTransport> {
+    const source = new LocalTransport(localDir);
+    await source.connect();
+    return source;
+  }
+
+  private async safeWalk(
+    transport: RemoteTransport,
+    dir: string,
+    ignore?: string[],
+  ): Promise<SyncEntry[]> {
+    try {
+      return await walkTree(transport, dir, { ignore });
+    } catch {
+      // リモート側にディレクトリがまだ存在しない場合は空とみなす。
+      return [];
+    }
   }
 
   async download(
