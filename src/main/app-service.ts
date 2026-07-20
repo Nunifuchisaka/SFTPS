@@ -1,5 +1,3 @@
-import { writeFile } from 'node:fs/promises';
-import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { LocalTransport, type RemoteEntry, type RemoteTransport } from '../core/transport/index';
 import type { BackupInfo, BackupManager } from '../core/backup/index';
@@ -16,6 +14,12 @@ import {
   type CommitResult,
   type UploadPreview,
 } from '../core/upload/index';
+import {
+  prepareDownload as corePrepareDownload,
+  commitDownload as coreCommitDownload,
+  type DownloadPreview,
+  type DownloadResult,
+} from '../core/download/index';
 import type { SecretStore } from './secret-store';
 import type { ProfileStore } from './profile-store';
 import type { Secrets } from './transport-factory';
@@ -164,17 +168,26 @@ export class AppService {
     }
   }
 
-  async download(
-    id: string,
-    remotePath: string,
-    savePath: string,
-  ): Promise<{ bytesWritten: number }> {
-    return this.withTransport(id, async (transport) => {
-      const data = await transport.readFile(remotePath);
-      await mkdir(path.dirname(savePath), { recursive: true });
-      await writeFile(savePath, data);
-      return { bytesWritten: data.length };
-    });
+  /** ダウンロード差分プレビュー（before=既存ローカル, after=リモート新内容）。 */
+  async prepareDownload(id: string, remotePath: string, savePath: string): Promise<DownloadPreview> {
+    const { local, localPath } = await this.openLocalTarget(savePath);
+    return this.withTransport(id, (remote) =>
+      corePrepareDownload(remote, local, remotePath, localPath),
+    );
+  }
+
+  /** リモートファイルをローカルへダウンロードする（上書き前に既存ローカルをバックアップ）。 */
+  async download(id: string, remotePath: string, savePath: string): Promise<DownloadResult> {
+    const { local, localPath } = await this.openLocalTarget(savePath);
+    return this.withTransport(id, (remote) =>
+      coreCommitDownload(remote, local, this.deps.backupManager, id, remotePath, localPath),
+    );
+  }
+
+  private async openLocalTarget(savePath: string): Promise<{ local: LocalTransport; localPath: string }> {
+    const local = new LocalTransport(path.dirname(savePath));
+    await local.connect();
+    return { local, localPath: `/${path.basename(savePath)}` };
   }
 
   async listBackups(id: string, remotePath: string): Promise<BackupInfo[]> {

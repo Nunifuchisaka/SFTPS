@@ -54,6 +54,9 @@ export function registerIpc(service: AppService, queue: TransferQueue): void {
     (_e, id: string, localDir: string, remoteDir: string, options?: SyncFolderOptions) =>
       service.commitSync(id, localDir, remoteDir, options),
   );
+  ipcMain.handle(IPC.prepareDownload, (_e, id: string, remote: string, save: string) =>
+    service.prepareDownload(id, remote, save),
+  );
   ipcMain.handle(IPC.download, (_e, id: string, remote: string, save: string) =>
     service.download(id, remote, save),
   );

@@ -175,4 +175,29 @@ describe('AppService', () => {
     expect(result.bytesWritten).toBe(7);
     expect((await readFile(savePath, 'utf8'))).toBe('payload');
   });
+
+  it('prepareDownload previews existing-local (before) vs remote (after)', async () => {
+    await service.saveProfile(ftpProfile);
+    await transport.connect();
+    await transport.writeFile('/p.txt', Buffer.from('axc', 'utf8'));
+    const savePath = join(localDir, 'p.txt');
+    await writeLocal(savePath, Buffer.from('abc', 'utf8'));
+
+    const preview = await service.prepareDownload('p1', '/p.txt', savePath);
+    expect(preview.isNew).toBe(false);
+    expect(preview.summary).toEqual({ added: 1, removed: 1 });
+  });
+
+  it('download backs up the existing local file before overwriting', async () => {
+    await service.saveProfile(ftpProfile);
+    await transport.connect();
+    await transport.writeFile('/r.txt', Buffer.from('REMOTE', 'utf8'));
+    const savePath = join(localDir, 'r.txt');
+    await writeLocal(savePath, Buffer.from('LOCALOLD', 'utf8'));
+
+    const result = await service.download('p1', '/r.txt', savePath);
+    expect(result.backupPath).not.toBeNull();
+    expect((await readFile(result.backupPath as string, 'utf8'))).toBe('LOCALOLD');
+    expect((await readFile(savePath, 'utf8'))).toBe('REMOTE');
+  });
 });

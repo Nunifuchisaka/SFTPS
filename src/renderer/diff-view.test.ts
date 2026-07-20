@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect } from 'vitest';
 import type { UploadPreview } from '../core/upload/index';
-import { createDiffView } from './diff-view';
+import { createDiffView, diffOrientationLabels } from './diff-view';
 
 const textPreview: UploadPreview = {
   localPath: '/local/page.html',
@@ -67,5 +67,21 @@ describe('createDiffView', () => {
     });
     const notice = el.querySelector('.diff_1__new');
     expect(notice?.textContent).toContain('99');
+  });
+});
+
+describe('diffOrientationLabels', () => {
+  it('labels download as local(before, removed/red) vs remote(after, added/green)', () => {
+    expect(diffOrientationLabels('download')).toEqual({
+      beforeLabel: 'ローカル(既存)',
+      afterLabel: 'リモート(新)',
+    });
+  });
+
+  it('labels upload as remote(before) vs local(after)', () => {
+    expect(diffOrientationLabels('upload')).toEqual({
+      beforeLabel: 'リモート(既存)',
+      afterLabel: 'ローカル(新)',
+    });
   });
 });

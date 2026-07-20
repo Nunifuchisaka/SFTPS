@@ -1,5 +1,22 @@
 import type { UploadPreview } from '../core/upload/index';
 
+export type TransferDirection = 'upload' | 'download';
+
+/**
+ * 差分の向きラベル。取り違え防止用。
+ * - upload: before=リモート既存, after=ローカル新
+ * - download: before=ローカル既存, after=リモート新
+ * removed(赤)=before側にのみ存在, added(緑)=after側にのみ存在。
+ */
+export function diffOrientationLabels(direction: TransferDirection): {
+  beforeLabel: string;
+  afterLabel: string;
+} {
+  return direction === 'download'
+    ? { beforeLabel: 'ローカル(既存)', afterLabel: 'リモート(新)' }
+    : { beforeLabel: 'リモート(既存)', afterLabel: 'ローカル(新)' };
+}
+
 /**
  * アップロードプレビューから差分表示用の DOM を生成する純粋関数。
  * - テキスト: 一文字単位のセグメントを is_added / is_removed / is_equal で色分け表示

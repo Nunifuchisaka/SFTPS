@@ -1,6 +1,7 @@
 import type { Profile } from '../core/profile/index';
 import type { RemoteEntry } from '../core/transport/index';
 import type { UploadPreview, CommitResult } from '../core/upload/index';
+import type { DownloadPreview, DownloadResult } from '../core/download/index';
 import type { BackupInfo } from '../core/backup/index';
 import type { CompareBy, PlanSummary, RunSyncResult, SyncAction } from '../core/sync/index';
 import type { OverallProgress, TransferTask } from '../core/queue/index';
@@ -58,6 +59,7 @@ export const IPC = {
   enqueueTransfer: 'queue:enqueue',
   queueStatus: 'queue:status',
   cancelAllTasks: 'queue:cancelAll',
+  prepareDownload: 'remote:prepareDownload',
   download: 'remote:download',
   listBackups: 'backup:list',
   restoreBackup: 'backup:restore',
@@ -96,7 +98,8 @@ export interface SftpsApi {
   enqueueTransfer(request: TransferRequest): Promise<string>;
   queueStatus(): Promise<QueueStatus>;
   cancelAllTasks(): Promise<void>;
-  download(id: string, remotePath: string, savePath: string): Promise<{ bytesWritten: number }>;
+  prepareDownload(id: string, remotePath: string, savePath: string): Promise<DownloadPreview>;
+  download(id: string, remotePath: string, savePath: string): Promise<DownloadResult>;
   listBackups(id: string, remotePath: string): Promise<BackupInfo[]>;
   restoreBackup(id: string, remotePath: string, timestamp?: Date): Promise<{ bytesWritten: number }>;
   isSecretStorageAvailable(): Promise<boolean>;

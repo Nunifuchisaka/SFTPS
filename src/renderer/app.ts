@@ -3,7 +3,7 @@ import type { RemoteEntry } from '../core/transport/index';
 import type { BackupInfo } from '../core/backup/index';
 import type { CompareBy } from '../core/sync/index';
 import type { QueueStatus, SyncFolderOptions } from '../shared/ipc';
-import { createDiffView } from './diff-view';
+import { createDiffView, diffOrientationLabels } from './diff-view';
 import { createSyncPlanView } from './sync-view';
 import {
   buildProfileFromForm,
@@ -460,10 +460,38 @@ export function mountApp(root: string | HTMLElement): void {
     if (!state.currentProfileId) return;
     const savePath = await api.pickSavePath(basename(remotePath));
     if (!savePath) return;
-    const r = await guard('ダウンロード', () =>
+    const preview = await guard('ダウンロード差分', () =>
+      api.prepareDownload(state.currentProfileId as string, remotePath, savePath),
+    );
+    diffPanel.replaceChildren();
+    if (!preview) return;
+    const labels = diffOrientationLabels('download');
+    diffPanel.append(
+      h('div', { class: 'diff_1__orient' }, [`− ${labels.beforeLabel} ／ ＋ ${labels.afterLabel}`]),
+      createDiffView(preview),
+      h(
+        'button',
+        {
+          class: 'btn_1 btn_1--primary',
+          onclick: () => void commitDownloadNow(remotePath, savePath),
+        },
+        ['この内容でダウンロード確定'],
+      ),
+    );
+  }
+
+  async function commitDownloadNow(remotePath: string, savePath: string): Promise<void> {
+    if (!state.currentProfileId) return;
+    const r = await guard('ダウンロード確定', () =>
       api.download(state.currentProfileId as string, remotePath, savePath),
     );
-    if (r) setStatus(`ダウンロード完了: ${r.bytesWritten}B → ${savePath}`);
+    if (r) {
+      setStatus(
+        `ダウンロード完了: ${r.bytesWritten}B → ${savePath}` +
+          (r.backupPath ? ` / バックアップ: ${r.backupPath}` : ' / バックアップなし（新規）'),
+      );
+      await loadLocal(state.localDir);
+    }
   }
 
   // ---- backups --------------------------------------------------------------
