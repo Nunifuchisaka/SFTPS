@@ -112,6 +112,31 @@ h3 {
   word-break: break-all;
 }
 
+.browser_1__tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.browser_1__tools .form_1__input {
+  width: auto;
+  flex: 1;
+  min-width: 80px;
+}
+
+.header_1 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.header_1__toggle {
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .btn_1 {
   border: 1px solid var(--line);
   background: #333640;

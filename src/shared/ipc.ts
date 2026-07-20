@@ -108,4 +108,6 @@ export interface SftpsApi {
   pickFile(): Promise<string | null>;
   pickDirectory(): Promise<string | null>;
   pickSavePath(defaultName: string): Promise<string | null>;
+  /** ドロップされた File の OS パスを取得する（preload の webUtils による同期呼び出し）。 */
+  getPathForFile(file: File): string;
 }

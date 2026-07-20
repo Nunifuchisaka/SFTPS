@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { IPC, type SftpsApi } from '../shared/ipc';
 
 const api: SftpsApi = {
@@ -31,6 +31,7 @@ const api: SftpsApi = {
   pickFile: () => ipcRenderer.invoke(IPC.pickFile),
   pickDirectory: () => ipcRenderer.invoke(IPC.pickDirectory),
   pickSavePath: (defaultName) => ipcRenderer.invoke(IPC.pickSavePath, defaultName),
+  getPathForFile: (file) => webUtils.getPathForFile(file),
 };
 
 contextBridge.exposeInMainWorld('api', api);

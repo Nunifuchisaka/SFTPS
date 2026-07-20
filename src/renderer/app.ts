@@ -2,9 +2,21 @@ import type { Profile, Protocol } from '../core/profile/index';
 import type { RemoteEntry } from '../core/transport/index';
 import type { BackupInfo } from '../core/backup/index';
 import type { CompareBy } from '../core/sync/index';
+import {
+  filterEntries,
+  sortEntries,
+  toggleSelection,
+  pruneSelection,
+  resolveDropTargets,
+  type SortKey,
+  type SortDir,
+  type DroppedItem,
+} from '../core/browse/index';
 import type { QueueStatus, SyncFolderOptions } from '../shared/ipc';
 import { createDiffView, diffOrientationLabels } from './diff-view';
 import { createSyncPlanView } from './sync-view';
+import { buildUploadRequests, buildRequestsFromDropTargets } from './bulk-transfer';
+import { attachDropZone } from './dnd';
 import {
   buildProfileFromForm,
   profileToFormValues,
@@ -52,6 +64,13 @@ interface State {
   selectedRemote: string | null;
   syncLocalDir: string | null;
   editing: Profile | null;
+  showHidden: boolean;
+  localFilter: string;
+  remoteFilter: string;
+  localSort: { key: SortKey; dir: SortDir };
+  remoteSort: { key: SortKey; dir: SortDir };
+  localSelection: Set<string>;
+  remoteSelection: Set<string>;
 }
 
 export function mountApp(root: string | HTMLElement): void {
@@ -68,6 +87,13 @@ export function mountApp(root: string | HTMLElement): void {
     selectedRemote: null,
     syncLocalDir: null,
     editing: null,
+    showHidden: false,
+    localFilter: '',
+    remoteFilter: '',
+    localSort: { key: 'name', dir: 'asc' },
+    remoteSort: { key: 'name', dir: 'asc' },
+    localSelection: new Set(),
+    remoteSelection: new Set(),
   };
 
   const statusBar = h('div', { class: 'status_1' });
@@ -282,17 +308,86 @@ export function mountApp(root: string | HTMLElement): void {
     renderLocal();
   }
 
+  function viewEntries(
+    entries: RemoteEntry[],
+    filter: string,
+    sort: { key: SortKey; dir: SortDir },
+  ): RemoteEntry[] {
+    return sortEntries(
+      filterEntries(entries, filter, { showHidden: state.showHidden }),
+      sort.key,
+      sort.dir,
+    );
+  }
+
+  function sortHeader(
+    label: string,
+    key: SortKey,
+    sort: { key: SortKey; dir: SortDir },
+    onChange: (s: { key: SortKey; dir: SortDir }) => void,
+  ): HTMLElement {
+    const active = sort.key === key;
+    const arrow = active ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+    return h(
+      'button',
+      {
+        class: `btn_1${active ? ' is_active' : ''}`,
+        onclick: () => onChange({ key, dir: active && sort.dir === 'asc' ? 'desc' : 'asc' }),
+      },
+      [label + arrow],
+    );
+  }
+
   function renderLocal(): void {
     localPanel.replaceChildren();
+    state.localSelection = pruneSelection(
+      state.localSelection,
+      state.localEntries.filter((e) => e.type === 'file').map((e) => e.path),
+    );
+    const filterIn = h('input', {
+      class: 'form_1__input',
+      type: 'text',
+      value: state.localFilter,
+      placeholder: '絞り込み',
+    }) as HTMLInputElement;
+    filterIn.addEventListener('input', () => {
+      state.localFilter = filterIn.value;
+      renderLocal();
+    });
+
     localPanel.append(
       h('h2', {}, ['ローカル']),
       h('div', { class: 'browser_1__path' }, [state.localDir || '(未選択)']),
-      h('button', { class: 'btn_1', onclick: () => void loadLocal(parentDir(state.localDir)) }, ['..上へ']),
+      h('div', { class: 'browser_1__tools' }, [
+        h('button', { class: 'btn_1', onclick: () => void loadLocal(parentDir(state.localDir)) }, ['..上へ']),
+        filterIn,
+        sortHeader('名前', 'name', state.localSort, (s) => {
+          state.localSort = s;
+          renderLocal();
+        }),
+        sortHeader('サイズ', 'size', state.localSort, (s) => {
+          state.localSort = s;
+          renderLocal();
+        }),
+        sortHeader('日時', 'modified', state.localSort, (s) => {
+          state.localSort = s;
+          renderLocal();
+        }),
+      ]),
     );
+
     const list = h('ul', { class: 'list_1' });
-    for (const e of state.localEntries) {
-      const selected = e.type === 'file' && e.path === state.selectedLocal;
-      const item = h('li', { class: `list_1__item${selected ? ' is_active' : ''}` }, [
+    for (const e of viewEntries(state.localEntries, state.localFilter, state.localSort)) {
+      const children: Array<Node | string> = [];
+      if (e.type === 'file') {
+        const cb = h('input', { type: 'checkbox' }) as HTMLInputElement;
+        cb.checked = state.localSelection.has(e.path);
+        cb.addEventListener('change', () => {
+          state.localSelection = toggleSelection(state.localSelection, e.path);
+        });
+        children.push(cb);
+      }
+      children.push(
         h(
           'span',
           {
@@ -308,10 +403,32 @@ export function mountApp(root: string | HTMLElement): void {
           },
           [`${e.type === 'dir' ? '📁' : '📄'} ${e.name}`],
         ),
-      ]);
-      list.append(item);
+      );
+      const selected = e.type === 'file' && e.path === state.selectedLocal;
+      list.append(h('li', { class: `list_1__item${selected ? ' is_active' : ''}` }, children));
     }
     localPanel.append(list);
+    localPanel.append(
+      h('button', { class: 'btn_1 btn_1--primary', onclick: () => void enqueueSelectedUploads() }, [
+        '選択をキューにアップロード',
+      ]),
+    );
+  }
+
+  async function enqueueSelectedUploads(): Promise<void> {
+    if (!state.currentProfileId) {
+      setStatus('先にプロファイルへ接続してください', true);
+      return;
+    }
+    const paths = [...state.localSelection];
+    if (paths.length === 0) {
+      setStatus('アップロードするファイルを選択してください', true);
+      return;
+    }
+    const requests = buildUploadRequests(state.currentProfileId, paths, state.remoteDir);
+    for (const req of requests) await api.enqueueTransfer(req);
+    setStatus(`${requests.length}件をアップロードキューに追加しました`);
+    await refreshQueue();
   }
 
   // ---- remote browser -------------------------------------------------------
@@ -332,15 +449,54 @@ export function mountApp(root: string | HTMLElement): void {
 
   function renderRemote(): void {
     remotePanel.replaceChildren();
-    remotePanel.append(
-      h('h2', {}, ['リモート']),
-      h('div', { class: 'browser_1__path' }, [state.remoteDir]),
-      h('button', { class: 'btn_1', onclick: () => void loadRemote(parentDir(state.remoteDir)) }, ['..上へ']),
+    state.remoteSelection = pruneSelection(
+      state.remoteSelection,
+      state.remoteEntries.filter((e) => e.type === 'file').map((e) => e.path),
     );
+    const filterIn = h('input', {
+      class: 'form_1__input',
+      type: 'text',
+      value: state.remoteFilter,
+      placeholder: '絞り込み',
+    }) as HTMLInputElement;
+    filterIn.addEventListener('input', () => {
+      state.remoteFilter = filterIn.value;
+      renderRemote();
+    });
+
+    remotePanel.append(
+      h('h2', {}, ['リモート（ここにOSからファイルをドロップでUL）']),
+      h('div', { class: 'browser_1__path' }, [state.remoteDir]),
+      h('div', { class: 'browser_1__tools' }, [
+        h('button', { class: 'btn_1', onclick: () => void loadRemote(parentDir(state.remoteDir)) }, ['..上へ']),
+        filterIn,
+        sortHeader('名前', 'name', state.remoteSort, (s) => {
+          state.remoteSort = s;
+          renderRemote();
+        }),
+        sortHeader('サイズ', 'size', state.remoteSort, (s) => {
+          state.remoteSort = s;
+          renderRemote();
+        }),
+        sortHeader('日時', 'modified', state.remoteSort, (s) => {
+          state.remoteSort = s;
+          renderRemote();
+        }),
+      ]),
+    );
+
     const list = h('ul', { class: 'list_1' });
-    for (const e of state.remoteEntries) {
-      const selected = e.type === 'file' && e.path === state.selectedRemote;
-      const item = h('li', { class: `list_1__item${selected ? ' is_active' : ''}` }, [
+    for (const e of viewEntries(state.remoteEntries, state.remoteFilter, state.remoteSort)) {
+      const children: Array<Node | string> = [];
+      if (e.type === 'file') {
+        const cb = h('input', { type: 'checkbox' }) as HTMLInputElement;
+        cb.checked = state.remoteSelection.has(e.path);
+        cb.addEventListener('change', () => {
+          state.remoteSelection = toggleSelection(state.remoteSelection, e.path);
+        });
+        children.push(cb);
+      }
+      children.push(
         h(
           'span',
           {
@@ -357,13 +513,64 @@ export function mountApp(root: string | HTMLElement): void {
           },
           [`${e.type === 'dir' ? '📁' : '📄'} ${e.name} (${e.size}B)`],
         ),
-        e.type === 'file'
-          ? h('button', { class: 'btn_1', onclick: () => void downloadFile(e.path) }, ['DL'])
-          : document.createTextNode(''),
-      ]);
-      list.append(item);
+      );
+      if (e.type === 'file') {
+        children.push(h('button', { class: 'btn_1', onclick: () => void downloadFile(e.path) }, ['DL']));
+      }
+      const selected = e.type === 'file' && e.path === state.selectedRemote;
+      list.append(h('li', { class: `list_1__item${selected ? ' is_active' : ''}` }, children));
     }
     remotePanel.append(list);
+    remotePanel.append(
+      h('button', { class: 'btn_1', onclick: () => void enqueueSelectedDownloads() }, [
+        '選択をキューにダウンロード',
+      ]),
+    );
+  }
+
+  async function enqueueSelectedDownloads(): Promise<void> {
+    if (!state.currentProfileId) {
+      setStatus('先にプロファイルへ接続してください', true);
+      return;
+    }
+    const paths = [...state.remoteSelection];
+    if (paths.length === 0) {
+      setStatus('ダウンロードするファイルを選択してください', true);
+      return;
+    }
+    const dir = state.localDir || (await api.homeDir());
+    for (const remotePath of paths) {
+      const name = basename(remotePath);
+      await api.enqueueTransfer({
+        kind: 'download',
+        profileId: state.currentProfileId,
+        remotePath,
+        savePath: `${dir.replace(/[\\/]+$/, '')}/${name}`,
+        label: name,
+      });
+    }
+    setStatus(`${paths.length}件をダウンロードキューに追加しました`);
+    await refreshQueue();
+  }
+
+  function handleOsDrop(files: FileList): void {
+    if (!state.currentProfileId) {
+      setStatus('先にプロファイルへ接続してください', true);
+      return;
+    }
+    const items: DroppedItem[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const path = api.getPathForFile(files[i]);
+      if (path) items.push({ path, isDirectory: false });
+    }
+    if (items.length === 0) return;
+    const targets = resolveDropTargets(items, state.remoteDir);
+    const requests = buildRequestsFromDropTargets(state.currentProfileId, targets);
+    void (async () => {
+      for (const req of requests) await api.enqueueTransfer(req);
+      setStatus(`${requests.length}件をドロップからキューに追加しました`);
+      await refreshQueue();
+    })();
   }
 
   // ---- transfer / diff ------------------------------------------------------
@@ -692,8 +899,19 @@ export function mountApp(root: string | HTMLElement): void {
   }
 
   // ---- boot -----------------------------------------------------------------
+  const hiddenChk = h('input', { type: 'checkbox' }) as HTMLInputElement;
+  hiddenChk.checked = state.showHidden;
+  hiddenChk.addEventListener('change', () => {
+    state.showHidden = hiddenChk.checked;
+    renderLocal();
+    renderRemote();
+  });
+
   container.replaceChildren(
-    h('header', { class: 'header_1' }, [h('h1', {}, ['SFTPS — FTP / SFTP / S3 クライアント'])]),
+    h('header', { class: 'header_1' }, [
+      h('h1', {}, ['SFTPS — FTP / SFTP / S3 クライアント']),
+      h('label', { class: 'header_1__toggle' }, [hiddenChk, ' 隠しファイル表示']),
+    ]),
     secretWarn,
     h('main', { class: 'layout_1' }, [
       h('section', { class: 'layout_1__col' }, [profilePanel]),
@@ -702,6 +920,8 @@ export function mountApp(root: string | HTMLElement): void {
     ]),
     statusBar,
   );
+
+  attachDropZone(remotePanel, handleOsDrop);
 
   void (async () => {
     const available = await api.isSecretStorageAvailable();

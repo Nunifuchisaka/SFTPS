@@ -7,3 +7,4 @@ export * from './download/index';
 export * from './hostkey/index';
 export * from './sync/index';
 export * from './queue/index';
+export * from './browse/index';
