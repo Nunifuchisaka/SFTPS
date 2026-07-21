@@ -29,6 +29,21 @@ export function sanitizeRemotePath(remotePath: string): string {
   return remotePath.replace(/[\\/:*?"<>|]/g, '_');
 }
 
+/** バックアップ名前空間の 1 セグメントを、ディレクトリ名として安全な形に丸める。 */
+function sanitizeSegment(segment: string): string {
+  if (segment === '' || segment === '.' || segment === '..') return '_';
+  return segment.replace(/[^A-Za-z0-9._-]/g, '_');
+}
+
+/**
+ * バックアップ名前空間（profileId、または `<profileId>/download`）をパス構成要素として消毒する。
+ * `/` 区切りの階層構造は保ったまま、各セグメントから親ディレクトリ参照・区切り文字を取り除き、
+ * backupRoot の外へ出られないようにする（プロファイル ID の検証をすり抜けた場合の二重防御）。
+ */
+export function sanitizeBackupNamespace(namespace: string): string {
+  return namespace.split('/').map(sanitizeSegment).join('/');
+}
+
 function pad(n: number, width = 2): string {
   return String(n).padStart(width, '0');
 }
@@ -124,7 +139,11 @@ export class BackupManager {
   }
 
   private dirFor(profileId: string, remotePath: string): string {
-    return path.join(this.backupRoot, profileId, sanitizeRemotePath(remotePath));
+    return path.join(
+      this.backupRoot,
+      sanitizeBackupNamespace(profileId),
+      sanitizeRemotePath(remotePath),
+    );
   }
 
   private async readGenerations(

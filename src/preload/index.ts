@@ -34,6 +34,8 @@ const api: SftpsApi = {
   listBackups: (id, remotePath) => ipcRenderer.invoke(IPC.listBackups, id, remotePath),
   restoreBackup: (id, remotePath, timestamp) =>
     ipcRenderer.invoke(IPC.restoreBackup, id, remotePath, timestamp),
+  listKnownHosts: () => ipcRenderer.invoke(IPC.listKnownHosts),
+  removeKnownHost: (host, port) => ipcRenderer.invoke(IPC.removeKnownHost, host, port),
   isSecretStorageAvailable: () => ipcRenderer.invoke(IPC.isSecretStorageAvailable),
   listLocal: (dir) => ipcRenderer.invoke(IPC.listLocal, dir),
   homeDir: () => ipcRenderer.invoke(IPC.homeDir),

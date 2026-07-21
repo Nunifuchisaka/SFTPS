@@ -1,6 +1,6 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import path from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { parseProfiles, serializeProfiles, type Profile } from '../core/profile/index';
+import { writeFileAtomic } from './atomic-write';
 
 /**
  * 接続プロファイル（シークレット非保持）を JSON ファイルへ永続化する。
@@ -20,7 +20,6 @@ export class ProfileStore {
   }
 
   async saveAll(profiles: Profile[]): Promise<void> {
-    await mkdir(path.dirname(this.filePath), { recursive: true });
-    await writeFile(this.filePath, serializeProfiles(profiles), 'utf8');
+    await writeFileAtomic(this.filePath, serializeProfiles(profiles));
   }
 }

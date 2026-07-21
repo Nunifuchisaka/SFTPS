@@ -1,6 +1,6 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import path from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { HistoryStore, parseHistory, serializeHistory } from '../core/history/index';
+import { writeFileAtomic } from './atomic-write';
 
 /** 転送履歴を JSON ファイルへ薄く永続化する。判定/整形は core/history に委ねる。 */
 export class HistoryFile {
@@ -16,7 +16,6 @@ export class HistoryFile {
   }
 
   async save(store: HistoryStore): Promise<void> {
-    await mkdir(path.dirname(this.filePath), { recursive: true });
-    await writeFile(this.filePath, serializeHistory(store), 'utf8');
+    await writeFileAtomic(this.filePath, serializeHistory(store));
   }
 }

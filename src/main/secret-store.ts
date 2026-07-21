@@ -1,5 +1,5 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import path from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { writeFileAtomic } from './atomic-write';
 
 /** Electron の safeStorage のうち SecretStore が利用する API のみを表す構造型。 */
 export interface SafeStorageLike {
@@ -82,7 +82,6 @@ export class SecretStore {
   }
 
   private async writeAll(data: SecretFile): Promise<void> {
-    await mkdir(path.dirname(this.filePath), { recursive: true });
-    await writeFile(this.filePath, JSON.stringify(data, null, 2), 'utf8');
+    await writeFileAtomic(this.filePath, JSON.stringify(data, null, 2));
   }
 }

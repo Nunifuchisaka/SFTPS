@@ -289,7 +289,19 @@ export class AppService {
     });
   }
 
+  /**
+   * バックアップ系 API は IPC 引数の id をそのままファイルパスに使うため、
+   * 実在するプロファイルの id 以外は受け付けない（未知の id での探索・書き込みを防ぐ）。
+   */
+  private async requireProfile(id: string): Promise<Profile> {
+    const profiles = await this.deps.profileStore.list();
+    const profile = profiles.find((p) => p.id === id);
+    if (!profile) throw new Error(`profile not found: ${id}`);
+    return profile;
+  }
+
   async listBackups(id: string, remotePath: string): Promise<BackupInfo[]> {
+    await this.requireProfile(id);
     return this.deps.backupManager.listBackups(id, remotePath);
   }
 
@@ -303,6 +315,7 @@ export class AppService {
     remotePath: string,
     timestamp?: Date,
   ): Promise<RestoreBackupResult> {
+    await this.requireProfile(id);
     const data = await this.deps.backupManager.restore(id, remotePath, timestamp);
     return this.withTransport(id, async (transport) => {
       const backupPath = await this.deps.backupManager.backupExisting(transport, id, remotePath);
@@ -341,9 +354,7 @@ export class AppService {
   private async resolveConnection(
     id: string,
   ): Promise<{ transport: RemoteTransport; reconnect: ReconnectOptions }> {
-    const profiles = await this.deps.profileStore.list();
-    const profile = profiles.find((p) => p.id === id);
-    if (!profile) throw new Error(`profile not found: ${id}`);
+    const profile = await this.requireProfile(id);
     const secrets = (await this.deps.secretStore.getSecrets(id)) ?? {};
     const transport = this.deps.createTransport(profile, secrets);
     // autoReconnect 有効時は多段バックオフ、無効時は単発（初回失敗で即例外＝従来挙動）。

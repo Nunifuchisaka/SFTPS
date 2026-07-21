@@ -458,6 +458,35 @@ textarea.form_1__input {
   font-size: 12px;
 }
 
+.knownhosts_1__list {
+  list-style: none;
+  margin: 6px 0;
+  padding: 0;
+  max-height: 160px;
+  overflow: auto;
+}
+
+.knownhosts_1__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.knownhosts_1__label {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+}
+
+.knownhosts_1__empty {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .status_1 {
   position: sticky;
   bottom: 0;

@@ -1,6 +1,6 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import path from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { BookmarkStore, parseBookmarks, serializeBookmarks } from '../core/bookmark/index';
+import { writeFileAtomic } from './atomic-write';
 
 /** ブックマークを JSON ファイルへ薄く永続化する。判定/整形は core/bookmark に委ねる。 */
 export class BookmarkFile {
@@ -16,7 +16,6 @@ export class BookmarkFile {
   }
 
   async save(store: BookmarkStore): Promise<void> {
-    await mkdir(path.dirname(this.filePath), { recursive: true });
-    await writeFile(this.filePath, serializeBookmarks(store), 'utf8');
+    await writeFileAtomic(this.filePath, serializeBookmarks(store));
   }
 }

@@ -7,6 +7,7 @@ import type { CompareBy, PlanSummary, RunSyncResult, SyncAction } from '../core/
 import type { OverallProgress, TransferTask } from '../core/queue/index';
 import type { HistoryEntry, HistoryFilter } from '../core/history/index';
 import type { Bookmark, BookmarkInput } from '../core/bookmark/index';
+import type { KnownHostEntry } from '../core/hostkey/index';
 
 export interface ConnectionResult {
   ok: boolean;
@@ -88,6 +89,8 @@ export const IPC = {
   renameBookmark: 'bookmark:rename',
   listBackups: 'backup:list',
   restoreBackup: 'backup:restore',
+  listKnownHosts: 'hostkey:list',
+  removeKnownHost: 'hostkey:remove',
   isSecretStorageAvailable: 'secret:available',
   listLocal: 'local:list',
   homeDir: 'local:home',
@@ -141,6 +144,10 @@ export interface SftpsApi {
   renameBookmark(id: string, name: string): Promise<Bookmark>;
   listBackups(id: string, remotePath: string): Promise<BackupInfo[]>;
   restoreBackup(id: string, remotePath: string, timestamp?: Date): Promise<RestoreBackupResult>;
+  /** 信頼済みホスト鍵の一覧（host:port と SHA256 指紋）。 */
+  listKnownHosts(): Promise<KnownHostEntry[]>;
+  /** 信頼済みホスト鍵を削除する。次回接続時に指紋の確認をやり直す。 */
+  removeKnownHost(host: string, port: number): Promise<boolean>;
   isSecretStorageAvailable(): Promise<boolean>;
   listLocal(dir: string): Promise<RemoteEntry[]>;
   homeDir(): Promise<string>;

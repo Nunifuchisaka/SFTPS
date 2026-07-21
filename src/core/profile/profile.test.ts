@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
+  isValidProfileId,
   validateProfile,
   stripSecrets,
   assertNoSecrets,
@@ -45,7 +46,38 @@ const validS3: S3Profile = {
   secretAccessKey: 'topsecret',
 };
 
+describe('isValidProfileId', () => {
+  it('accepts ordinary identifiers', () => {
+    expect(isValidProfileId('p1')).toBe(true);
+    expect(isValidProfileId('my-profile_2.prod')).toBe(true);
+    expect(isValidProfileId('a'.repeat(64))).toBe(true);
+  });
+
+  it('rejects path separators and traversal segments', () => {
+    expect(isValidProfileId('../evil')).toBe(false);
+    expect(isValidProfileId('..')).toBe(false);
+    expect(isValidProfileId('.')).toBe(false);
+    expect(isValidProfileId('a/b')).toBe(false);
+    expect(isValidProfileId('a\\b')).toBe(false);
+    expect(isValidProfileId('C:')).toBe(false);
+  });
+
+  it('rejects empty, over-long and otherwise unsafe ids', () => {
+    expect(isValidProfileId('')).toBe(false);
+    expect(isValidProfileId('   ')).toBe(false);
+    expect(isValidProfileId('a'.repeat(65))).toBe(false);
+    expect(isValidProfileId('a b')).toBe(false);
+    expect(isValidProfileId('a\0b')).toBe(false);
+    expect(isValidProfileId('日本語')).toBe(false);
+  });
+});
+
 describe('validateProfile', () => {
+  it('rejects an id that could escape its directory', () => {
+    const errors = validateProfile({ ...validFtp, id: '../../etc' });
+    expect(errors.some((e) => /id/.test(e))).toBe(true);
+  });
+
   it('accepts a valid ftp/sftp/s3 profile', () => {
     expect(validateProfile(validFtp)).toEqual([]);
     expect(validateProfile(validSftp)).toEqual([]);
@@ -236,5 +268,34 @@ describe('serializeProfiles / parseProfiles', () => {
   it('rejects JSON with an invalid protocol', () => {
     const bad = JSON.stringify([{ id: 'x', name: 'y', protocol: 'gopher', host: 'h', port: 1, user: 'u' }]);
     expect(() => parseProfiles(bad)).toThrow();
+  });
+
+  it('rejects JSON whose id could escape its directory', () => {
+    const bad = JSON.stringify([{ ...stripSecrets(validFtp), id: '../../etc' }]);
+    expect(() => parseProfiles(bad)).toThrow();
+  });
+
+  it('strips secrets that a hand-edited or legacy file may contain', () => {
+    const dirty = JSON.stringify([validFtp, validSftp, validS3]); // 生の（シークレット入り）JSON
+    const parsed = parseProfiles(dirty, { onSecretDetected: () => undefined });
+    expect(parsed).toEqual([stripSecrets(validFtp), stripSecrets(validSftp), stripSecrets(validS3)]);
+    expect(JSON.stringify(parsed)).not.toContain('hunter2');
+    expect(JSON.stringify(parsed)).not.toContain('topsecret');
+    expect(JSON.stringify(parsed)).not.toContain('BEGIN KEY');
+  });
+
+  it('reports which fields were contaminated without echoing their values', () => {
+    const onSecretDetected = vi.fn();
+    parseProfiles(JSON.stringify([validFtp]), { onSecretDetected });
+    expect(onSecretDetected).toHaveBeenCalledTimes(1);
+    const [report] = onSecretDetected.mock.calls[0];
+    expect(report).toEqual({ index: 0, id: 'f1', keys: ['password'] });
+    expect(JSON.stringify(report)).not.toContain('hunter2');
+  });
+
+  it('does not report anything for a clean file', () => {
+    const onSecretDetected = vi.fn();
+    parseProfiles(serializeProfiles([validFtp]), { onSecretDetected });
+    expect(onSecretDetected).not.toHaveBeenCalled();
   });
 });

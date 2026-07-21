@@ -1,14 +1,37 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { LocalTransport } from '../transport/local-transport';
-import { BackupManager, sanitizeRemotePath } from './index';
+import { BackupManager, sanitizeRemotePath, sanitizeBackupNamespace } from './index';
 
 describe('sanitizeRemotePath', () => {
   it('replaces characters not allowed in Windows file names', () => {
     const s = sanitizeRemotePath('/a:b*c?d"e<f>g|h\\i/j');
     expect(s).not.toMatch(/[\\/:*?"<>|]/);
+  });
+});
+
+describe('sanitizeBackupNamespace', () => {
+  it('leaves a plain profile id untouched', () => {
+    expect(sanitizeBackupNamespace('p1')).toBe('p1');
+  });
+
+  it('preserves the download sub-namespace', () => {
+    expect(sanitizeBackupNamespace('p1/download')).toBe('p1/download');
+  });
+
+  it('neutralizes parent-directory segments', () => {
+    expect(sanitizeBackupNamespace('../../etc')).toBe('_/_/etc');
+    expect(sanitizeBackupNamespace('..')).toBe('_');
+    expect(sanitizeBackupNamespace('.')).toBe('_');
+  });
+
+  it('neutralizes separators, drive letters and empty segments', () => {
+    expect(sanitizeBackupNamespace('a\\b')).toBe('a_b');
+    expect(sanitizeBackupNamespace('C:/Windows')).toBe('C_/Windows');
+    expect(sanitizeBackupNamespace('')).toBe('_');
+    expect(sanitizeBackupNamespace('//')).toBe('_/_/_');
   });
 });
 
@@ -93,5 +116,22 @@ describe('BackupManager', () => {
     const saved = await mgr.backupExisting(transport, 'p', '/pub/style.css');
     expect(saved).not.toBeNull();
     expect(saved!.endsWith('.css')).toBe(true);
+  });
+
+  it('keeps a traversal-shaped profile id inside the backup root', async () => {
+    await transport.writeFile('/f.txt', Buffer.from('a'));
+    const mgr = new BackupManager({ backupRoot, now: () => new Date('2026-07-20T00:00:00.000Z') });
+    const saved = await mgr.backupExisting(transport, '../../escaped', '/f.txt');
+    expect(saved).not.toBeNull();
+    expect(resolve(saved!).startsWith(resolve(backupRoot) + sep)).toBe(true);
+  });
+
+  it('still separates the download namespace from the upload one', async () => {
+    await transport.writeFile('/f.txt', Buffer.from('a'));
+    const mgr = new BackupManager({ backupRoot, now: () => new Date('2026-07-20T00:00:00.000Z') });
+    await mgr.backupExisting(transport, 'p', '/f.txt');
+    await mgr.backupExisting(transport, 'p/download', '/f.txt');
+    expect(await mgr.listBackups('p', '/f.txt')).toHaveLength(1);
+    expect(await mgr.listBackups('p/download', '/f.txt')).toHaveLength(1);
   });
 });

@@ -209,6 +209,18 @@ describe('AppService', () => {
     expect((await transport.readFile('/f.txt')).toString('utf8')).toBe('OLD');
   });
 
+  it('rejects backup operations for a profile that does not exist', async () => {
+    await service.saveProfile(ftpProfile);
+    await expect(service.listBackups('nope', '/f.txt')).rejects.toThrow(/profile not found/);
+    await expect(service.restoreBackup('nope', '/f.txt')).rejects.toThrow(/profile not found/);
+  });
+
+  it('rejects backup operations for a traversal-shaped profile id', async () => {
+    await service.saveProfile(ftpProfile);
+    await expect(service.listBackups('../../etc', '/f.txt')).rejects.toThrow(/profile not found/);
+    await expect(service.restoreBackup('../../etc', '/f.txt')).rejects.toThrow(/profile not found/);
+  });
+
   it('restoreBackup backs up the current remote content before overwriting it', async () => {
     await service.saveProfile(ftpProfile);
     await transport.connect();

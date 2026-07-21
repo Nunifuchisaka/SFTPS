@@ -11,6 +11,7 @@ import type { TransferQueue } from '../../core/queue/index';
 import type { HistoryEntry, HistoryFilter, HistoryInput } from '../../core/history/index';
 import type { BookmarkInput } from '../../core/bookmark/index';
 import type { AppService } from '../app-service';
+import type { KnownHostsController } from '../known-hosts-controller';
 import { listLocalDir } from '../local-fs';
 import { taskToHistoryInput } from '../history-recorder';
 
@@ -26,6 +27,7 @@ export function registerIpc(
   service: AppService,
   queue: TransferQueue,
   history: HistoryController,
+  knownHosts: KnownHostsController,
 ): void {
   let seq = 0;
   const genId = (): string => `op${Date.now()}-${seq++}`;
@@ -156,6 +158,10 @@ export function registerIpc(
   );
   ipcMain.handle(IPC.restoreBackup, (_e, id: string, remote: string, ts?: Date) =>
     service.restoreBackup(id, remote, ts ? new Date(ts) : undefined),
+  );
+  ipcMain.handle(IPC.listKnownHosts, () => knownHosts.list());
+  ipcMain.handle(IPC.removeKnownHost, (_e, host: string, port: number) =>
+    knownHosts.remove(host, port),
   );
   ipcMain.handle(IPC.isSecretStorageAvailable, () => safeStorage.isEncryptionAvailable());
   ipcMain.handle(IPC.listLocal, (_e, dir: string) => listLocalDir(dir));

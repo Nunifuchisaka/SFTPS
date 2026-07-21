@@ -83,6 +83,20 @@ export function resolveFtpSecurity(profile: FtpProfile): FtpSecurity {
   return 'explicit';
 }
 
+/**
+ * プロファイル ID に許可する文字。
+ * ID はバックアップ保存先のディレクトリ名としてそのままパスに使われるため、
+ * パス区切り・親ディレクトリ参照・ドライブレター等を作れない文字集合に限定する。
+ */
+const PROFILE_ID_RE = /^[A-Za-z0-9._-]{1,64}$/;
+
+/** プロファイル ID がファイルパス構成要素として安全か判定する（純粋関数）。 */
+export function isValidProfileId(id: string): boolean {
+  if (typeof id !== 'string') return false;
+  if (id === '.' || id === '..') return false; // 文字集合は満たすがディレクトリ参照になる
+  return PROFILE_ID_RE.test(id);
+}
+
 /** S3 バケット名の命名規則を検証する。 */
 function isValidBucketName(name: string): boolean {
   if (name.length < 3 || name.length > 63) return false;
@@ -96,6 +110,9 @@ function isValidBucketName(name: string): boolean {
 export function validateProfile(profile: Profile): string[] {
   const errors: string[] = [];
   if (!profile.id?.trim()) errors.push('id is required');
+  else if (!isValidProfileId(profile.id)) {
+    errors.push('id must be 1-64 chars of A-Z a-z 0-9 . _ - (no path separators)');
+  }
   if (!profile.name?.trim()) errors.push('name is required');
 
   switch (profile.protocol) {
@@ -227,10 +244,42 @@ export function serializeProfiles(profiles: Profile[]): string {
   return JSON.stringify(safe, null, 2);
 }
 
-/** JSON 文字列からプロファイル配列を復元し、各要素を検証する。 */
-export function parseProfiles(json: string): Profile[] {
+/** シークレット混入の検知報告（値は含めない）。 */
+export interface SecretContaminationReport {
+  index: number;
+  id: string;
+  keys: SecretKey[];
+}
+
+export interface ParseProfilesOptions {
+  /** シークレット混入を検知したときの通知。既定は console.warn（値は出さない）。 */
+  onSecretDetected?: (report: SecretContaminationReport) => void;
+}
+
+/** オブジェクトに含まれているシークレットフィールド名を列挙する（値は返さない）。 */
+function detectSecretKeys(obj: Record<string, unknown>): SecretKey[] {
+  return SECRET_KEYS.filter((key) => {
+    const value = obj[key];
+    return value !== undefined && value !== null && value !== '';
+  });
+}
+
+function warnSecretContamination(report: SecretContaminationReport): void {
+  console.warn(
+    `profiles JSON contained secret field(s) [${report.keys.join(', ')}] for profile "${report.id}"; stripped on load`,
+  );
+}
+
+/**
+ * JSON 文字列からプロファイル配列を復元し、各要素を検証する。
+ * 旧版・手編集・移行等でシークレットが混入していても、
+ * 直列化側と同じく stripSecrets＋assertNoSecrets の二重防御を通してから返す
+ * （混入はキー名のみログに残し、値は決して残さない）。
+ */
+export function parseProfiles(json: string, options: ParseProfilesOptions = {}): Profile[] {
   const raw: unknown = JSON.parse(json);
   if (!Array.isArray(raw)) throw new Error('profiles JSON must be an array');
+  const onSecretDetected = options.onSecretDetected ?? warnSecretContamination;
 
   return raw.map((item, index) => {
     if (typeof item !== 'object' || item === null) {
@@ -245,6 +294,13 @@ export function parseProfiles(json: string): Profile[] {
     if (errors.length > 0) {
       throw new Error(`profile[${index}] is invalid: ${errors.join(', ')}`);
     }
-    return profile;
+
+    const contaminated = detectSecretKeys(profile as unknown as Record<string, unknown>);
+    if (contaminated.length > 0) {
+      onSecretDetected({ index, id: profile.id, keys: contaminated });
+    }
+    const stripped = stripSecrets(profile);
+    assertNoSecrets(stripped as unknown as Record<string, unknown>); // 二重防御
+    return stripped;
   });
 }

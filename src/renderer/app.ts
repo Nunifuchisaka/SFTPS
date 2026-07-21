@@ -18,9 +18,12 @@ import {
 import { confirmDeletion, parseMode, isActionAvailable } from '../core/remoteops/index';
 import type { HistoryFilter, HistoryKind, HistoryStatus } from '../core/history/index';
 import type { Bookmark } from '../core/bookmark/index';
+import type { KnownHostEntry } from '../core/hostkey/index';
 import { createHistoryView } from './history-view';
 import { createBookmarkView } from './bookmark-view';
+import { createKnownHostsView } from './known-hosts-view';
 import { createTranslator, dictionaries, resolveLocale, LOCALES } from '../core/i18n/index';
+import { classifyConnectionError, connectionErrorMessageKey } from '../core/reconnect/index';
 import { normalizeThemeSetting, THEME_SETTINGS, type ThemeSetting } from '../core/theme/index';
 import { applyTheme } from './theme';
 import type {
@@ -94,6 +97,7 @@ interface State {
   verifyAfterTransfer: boolean;
   bookmarks: Bookmark[];
   bookmarkName: string;
+  knownHosts: KnownHostEntry[];
 }
 
 export function mountApp(root: string | HTMLElement): void {
@@ -123,6 +127,7 @@ export function mountApp(root: string | HTMLElement): void {
     verifyAfterTransfer: false,
     bookmarks: [],
     bookmarkName: '',
+    knownHosts: [],
   };
 
   let bookmarkSeq = 0;
@@ -146,6 +151,7 @@ export function mountApp(root: string | HTMLElement): void {
   const statusBar = h('div', { class: 'status_1' });
   const secretWarn = h('div', { class: 'warn_1', hidden: true });
   const profilePanel = h('div', { class: 'panel_1' });
+  const knownHostsPanel = h('div', { class: 'panel_1' });
   const localPanel = h('div', { class: 'browser_1' });
   const remotePanel = h('div', { class: 'browser_1' });
   const transferPanel = h('div', { class: 'transfer_1' });
@@ -408,11 +414,47 @@ export function mountApp(root: string | HTMLElement): void {
     renderProfiles();
     const conn = await guard('接続テスト', () => api.testConnection(id));
     if (conn && !conn.ok) {
-      setStatus(`接続失敗: ${conn.error ?? ''}`, true);
+      // ホスト鍵・証明書の検証失敗は単なる接続失敗と区別して警告する。
+      const key = connectionErrorMessageKey(classifyConnectionError(conn.error ?? ''));
+      setStatus(key ? `${t(key)}（${conn.error ?? ''}）` : `接続失敗: ${conn.error ?? ''}`, true);
     }
     state.remoteDir = '/';
     await refreshBookmarks();
     await loadRemote('/');
+  }
+
+  // ---- known hosts ----------------------------------------------------------
+  async function refreshKnownHosts(): Promise<void> {
+    state.knownHosts = (await guard('信頼済みホスト鍵の読込', () => api.listKnownHosts())) ?? [];
+    renderKnownHosts();
+  }
+
+  function renderKnownHosts(): void {
+    knownHostsPanel.replaceChildren(
+      h('h2', {}, [t('panel.knownHosts')]),
+      h('div', { class: 'browser_1__tools' }, [
+        h('button', { class: 'btn_1', onclick: () => void refreshKnownHosts() }, [
+          t('knownHosts.reload'),
+        ]),
+      ]),
+      createKnownHostsView(state.knownHosts, {
+        onRemove: (entry) => void removeKnownHost(entry),
+        labels: { remove: t('knownHosts.remove'), empty: t('knownHosts.empty') },
+      }),
+    );
+  }
+
+  /** 信頼を取り消す（正当な鍵更新後は、これで次回接続時に指紋確認をやり直せる）。 */
+  async function removeKnownHost(entry: KnownHostEntry): Promise<void> {
+    const ok = window.confirm(
+      t('knownHosts.removeConfirm', { host: entry.host, port: entry.port }),
+    );
+    if (!ok) return;
+    const removed = await guard('信頼済みホスト鍵の削除', () =>
+      api.removeKnownHost(entry.host, entry.port),
+    );
+    if (removed === undefined) return;
+    await refreshKnownHosts();
   }
 
   // ---- local browser --------------------------------------------------------
@@ -1339,7 +1381,7 @@ export function mountApp(root: string | HTMLElement): void {
     ]),
     secretWarn,
     h('main', { class: 'layout_1' }, [
-      h('section', { class: 'layout_1__col' }, [profilePanel]),
+      h('section', { class: 'layout_1__col' }, [profilePanel, knownHostsPanel]),
       h('section', { class: 'layout_1__col' }, [localPanel, remotePanel]),
       h('section', { class: 'layout_1__col' }, [
         transferPanel,
@@ -1364,6 +1406,7 @@ export function mountApp(root: string | HTMLElement): void {
     const home = await api.homeDir();
     await loadLocal(home);
     await refreshProfiles();
+    await refreshKnownHosts();
     renderTransfer();
     renderSync();
     await refreshQueue();
