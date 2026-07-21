@@ -36,6 +36,18 @@ export function createDiffView(preview: UploadPreview): HTMLElement {
     return root;
   }
 
+  if (preview.tooLarge) {
+    // 巨大ファイルで文字差分を走らせるとメインプロセスが固まるため、省略した旨を明示する。
+    const notice = document.createElement('div');
+    notice.className = 'diff_1__toolarge';
+    const limit = preview.diffLimitBytes ?? 0;
+    notice.textContent =
+      `大きすぎるため差分表示を省略しました（上限 ${limit} バイト）: ` +
+      `${preview.beforeSize ?? 0} → ${preview.afterSize} バイト`;
+    root.appendChild(notice);
+    return root;
+  }
+
   if (preview.binary) {
     const binary = document.createElement('div');
     binary.className = 'diff_1__binary';

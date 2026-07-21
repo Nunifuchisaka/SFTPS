@@ -1,6 +1,10 @@
 import { nextStatus, type TaskKind, type TransferTask } from './task';
 import { nextRetryDelay, type RetryOptions } from './retry';
 import { aggregateProgress, type OverallProgress, type TaskProgress } from './progress';
+import { planTaskRetention } from './retention';
+
+/** 完了タスクの既定保持件数（無制限にするとメモリと IPC ペイロードが単調増加する）。 */
+export const DEFAULT_MAX_COMPLETED_TASKS = 200;
 
 export interface RunContext {
   /** 協調キャンセル用シグナル。転送関数は可能なら監視して中断する。 */
@@ -21,6 +25,10 @@ export interface TransferQueueOptions {
   onUpdate?: (task: TransferTask) => void;
   /** タスク進捗の通知。 */
   onProgress?: (taskId: string, progress: TaskProgress) => void;
+  /** 保持する完了タスクの上限（既定 DEFAULT_MAX_COMPLETED_TASKS）。 */
+  maxCompletedTasks?: number;
+  /** 保持上限やクリアで破棄される完了タスク（破棄の直前に通知。履歴保存などに使う）。 */
+  onEvict?: (tasks: TransferTask[]) => void;
 }
 
 export interface AddTaskInput {
@@ -43,16 +51,18 @@ function errorMessage(err: unknown): string {
  * 協調キャンセル・進捗通知を担う。実際の転送は runTask 注入で行う。
  */
 export class TransferQueue {
-  private readonly tasks: TransferTask[] = [];
+  private tasks: TransferTask[] = [];
   private readonly controllers = new Map<string, AbortController>();
   private readonly progress = new Map<string, TaskProgress>();
   private readonly canceled = new Set<string>();
   private readonly concurrency: number;
   private readonly delay: (ms: number) => Promise<void>;
+  private readonly maxCompletedTasks: number;
 
   constructor(private readonly options: TransferQueueOptions) {
     this.concurrency = Math.max(1, options.concurrency ?? 1);
     this.delay = options.delay ?? realDelay;
+    this.maxCompletedTasks = options.maxCompletedTasks ?? DEFAULT_MAX_COMPLETED_TASKS;
   }
 
   add(input: AddTaskInput): TransferTask {
@@ -107,6 +117,30 @@ export class TransferQueue {
     };
     const workerCount = Math.min(this.concurrency, pending.length);
     await Promise.all(Array.from({ length: workerCount }, () => worker()));
+    // 完了タスクは放置すると単調増加するため、一巡ごとに保持上限まで刈り取る。
+    this.prune(this.maxCompletedTasks);
+  }
+
+  /** 完了（成功/失敗/キャンセル）タスクを全て破棄し、破棄したタスクを返す。 */
+  clearCompleted(): TransferTask[] {
+    return this.prune(0);
+  }
+
+  /** 完了タスクを保持上限まで刈り取り、破棄したタスク（複製）を返す。 */
+  private prune(limit: number): TransferTask[] {
+    const plan = planTaskRetention(this.tasks, limit);
+    if (plan.removedIds.length === 0) return [];
+
+    const removed = new Set(plan.removedIds);
+    const dropped = this.tasks.filter((t) => removed.has(t.id)).map((t) => ({ ...t }));
+    this.tasks = plan.keep;
+    for (const id of removed) {
+      this.controllers.delete(id);
+      this.progress.delete(id);
+      this.canceled.delete(id);
+    }
+    this.options.onEvict?.(dropped);
+    return dropped;
   }
 
   private async processTask(task: TransferTask): Promise<void> {

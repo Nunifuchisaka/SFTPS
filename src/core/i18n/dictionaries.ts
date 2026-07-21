@@ -22,6 +22,21 @@ export const dictionaries: Record<Locale, Dictionary> = {
     'panel.queue': '転送キュー',
     'panel.history': '転送履歴',
     'panel.bookmarks': 'ブックマーク',
+    'panel.settings': '設定',
+    'settings.backupMaxGenerations': 'バックアップ世代数',
+    'settings.backupMaxAgeDays': 'バックアップ保持日数（0 で無期限）',
+    'settings.diffMaxBytes': '差分プレビュー上限（バイト）',
+    'settings.note':
+      'バックアップは暗号化されずローカルに保存されます。資格情報を含むファイル（.env / wp-config.php 等）を扱う場合は保持日数を短くしてください。差分プレビュー上限を超えるファイルは文字差分を行わずサイズ比較のみ表示します。',
+    'settings.saved': '設定を保存しました',
+    'btn.clearCompleted': '完了分をクリア',
+    'profile.deleteConfirm': 'プロファイル {id} を削除します。よろしいですか？',
+    'profile.deleteRelatedConfirm':
+      '{id} に紐づくブックマーク・転送履歴・信頼済みホスト鍵も削除しますか？（キャンセルすると、これらは残ります）',
+    'profile.deleteBackupsConfirm':
+      '{id} のバックアップ（上書き前に退避したファイル本体）も削除しますか？削除すると復元できなくなります。',
+    'profile.s3UseDefaultCredentials':
+      'マシンの既定資格情報を使う（環境変数 / ~/.aws / IMDS）',
     'btn.addBookmark': '現在のパスをブックマーク',
     'bookmark.namePrompt': 'ブックマーク名を入力してください',
     'browser.local': 'ローカル',
@@ -68,6 +83,21 @@ export const dictionaries: Record<Locale, Dictionary> = {
     'panel.queue': 'Transfer queue',
     'panel.history': 'Transfer history',
     'panel.bookmarks': 'Bookmarks',
+    'panel.settings': 'Settings',
+    'settings.backupMaxGenerations': 'Backup generations',
+    'settings.backupMaxAgeDays': 'Backup retention in days (0 = unlimited)',
+    'settings.diffMaxBytes': 'Diff preview limit (bytes)',
+    'settings.note':
+      'Backups are stored locally without encryption. Keep the retention short when you edit files that carry credentials (.env, wp-config.php and the like). Files larger than the diff preview limit are shown as a size comparison instead of a character diff.',
+    'settings.saved': 'Settings saved',
+    'btn.clearCompleted': 'Clear finished',
+    'profile.deleteConfirm': 'Delete profile {id}?',
+    'profile.deleteRelatedConfirm':
+      'Also delete the bookmarks, transfer history and trusted host key that belong to {id}? (Cancel keeps them.)',
+    'profile.deleteBackupsConfirm':
+      'Also delete the backups of {id} (the saved copies of overwritten files)? They cannot be restored afterwards.',
+    'profile.s3UseDefaultCredentials':
+      'Use the machine default credentials (env vars / ~/.aws / IMDS)',
     'btn.addBookmark': 'Bookmark current path',
     'bookmark.namePrompt': 'Enter a bookmark name',
     'browser.local': 'Local',

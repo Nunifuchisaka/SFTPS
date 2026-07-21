@@ -166,3 +166,22 @@ describe('bookmark JSON round-trip', () => {
     expect(() => parseBookmarks('{}')).toThrow();
   });
 });
+
+describe('BookmarkStore removeByProfile', () => {
+  it('drops only the bookmarks of the given profile and reports the count', () => {
+    const store = new BookmarkStore();
+    store.add(input({ id: 'a', profileId: 'p1', remotePath: '/a' }));
+    store.add(input({ id: 'b', profileId: 'p2', remotePath: '/b' }));
+    store.add(input({ id: 'c', profileId: 'p1', remotePath: '/c' }));
+
+    expect(store.removeByProfile('p1')).toBe(2);
+    expect(store.list().map((b) => b.id)).toEqual(['b']);
+  });
+
+  it('returns 0 when nothing matches', () => {
+    const store = new BookmarkStore();
+    store.add(input({ id: 'a', profileId: 'p1', remotePath: '/a' }));
+    expect(store.removeByProfile('nope')).toBe(0);
+    expect(store.list()).toHaveLength(1);
+  });
+});

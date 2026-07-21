@@ -37,6 +37,10 @@ export interface AppTransferQueueOptions {
   retry?: RetryOptions;
   concurrency?: number;
   onUpdate?: (task: TransferTask) => void;
+  /** 保持上限を超えて破棄される完了タスク（破棄前に履歴へ残すため）。 */
+  onEvict?: (tasks: TransferTask[]) => void;
+  /** 保持する完了タスクの上限。 */
+  maxCompletedTasks?: number;
 }
 
 const DEFAULT_RETRY: RetryOptions = {
@@ -90,6 +94,10 @@ export function createAppTransferQueue(
       }
     },
     ...(options.onUpdate ? { onUpdate: options.onUpdate } : {}),
+    ...(options.onEvict ? { onEvict: options.onEvict } : {}),
+    ...(options.maxCompletedTasks !== undefined
+      ? { maxCompletedTasks: options.maxCompletedTasks }
+      : {}),
   };
   return new TransferQueue(queueOptions);
 }

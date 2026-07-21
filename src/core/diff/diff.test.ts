@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { diffChars, isBinary, stripBom, summarize, diffContent } from './index';
+import {
+  diffChars,
+  isBinary,
+  stripBom,
+  summarize,
+  diffContent,
+  DEFAULT_MAX_DIFF_BYTES,
+} from './index';
 
 describe('diffChars', () => {
   it('diffs at the character level', () => {
@@ -53,7 +60,7 @@ describe('diffContent', () => {
   it('returns character segments and a summary for text', () => {
     const result = diffContent(Buffer.from('abc', 'utf8'), Buffer.from('axc', 'utf8'));
     expect(result.binary).toBe(false);
-    if (!result.binary) {
+    if (!result.binary && !result.tooLarge) {
       expect(result.summary).toEqual({ added: 1, removed: 1 });
       expect(result.segments).toContainEqual({ type: 'added', value: 'x' });
     }
@@ -64,7 +71,7 @@ describe('diffContent', () => {
     const after = Buffer.from('hello', 'utf8');
     const result = diffContent(before, after);
     expect(result.binary).toBe(false);
-    if (!result.binary) {
+    if (!result.binary && !result.tooLarge) {
       expect(result.summary).toEqual({ added: 0, removed: 0 });
     }
   });
@@ -78,5 +85,49 @@ describe('diffContent', () => {
       expect(result.beforeSize).toBe(3);
       expect(result.afterSize).toBe(4);
     }
+  });
+});
+
+describe('diffContent size limit (DoS guard)', () => {
+  const big = (size: number, fill = 'a') => Buffer.from(fill.repeat(size), 'utf8');
+
+  it('exposes a 1MB default limit', () => {
+    expect(DEFAULT_MAX_DIFF_BYTES).toBe(1024 * 1024);
+  });
+
+  it('skips the character diff when either side exceeds the limit', () => {
+    const result = diffContent(big(10), big(20, 'b'), { maxBytes: 15 });
+    expect(result.binary).toBe(false);
+    expect(result.tooLarge).toBe(true);
+    if (!result.binary && result.tooLarge) {
+      expect(result.beforeSize).toBe(10);
+      expect(result.afterSize).toBe(20);
+      expect(result.limitBytes).toBe(15);
+    }
+  });
+
+  it('still diffs content that is exactly at the limit', () => {
+    const result = diffContent(big(8), big(8, 'b'), { maxBytes: 8 });
+    expect(result.tooLarge).toBe(false);
+    if (!result.binary && !result.tooLarge) {
+      expect(result.summary).toEqual({ added: 8, removed: 8 });
+    }
+  });
+
+  it('reports binary content as binary even when it is over the limit', () => {
+    const before = Buffer.concat([Buffer.from([0x00]), big(100)]);
+    const result = diffContent(before, big(100), { maxBytes: 10 });
+    expect(result.binary).toBe(true);
+  });
+
+  it('treats a non-positive limit as unlimited', () => {
+    const result = diffContent(big(100), big(100, 'b'), { maxBytes: 0 });
+    expect(result.tooLarge).toBe(false);
+  });
+
+  it('applies the default limit when no option is given', () => {
+    const oversize = Buffer.alloc(DEFAULT_MAX_DIFF_BYTES + 1, 0x61);
+    const result = diffContent(oversize, oversize);
+    expect(result.tooLarge).toBe(true);
   });
 });

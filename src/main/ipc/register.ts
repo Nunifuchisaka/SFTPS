@@ -1,182 +1,103 @@
-import { ipcMain, dialog, safeStorage } from 'electron';
-import { homedir } from 'node:os';
+import { ipcMain } from 'electron';
 import {
   IPC,
+  type DeleteProfileOptions,
   type SaveProfileOptions,
   type SyncFolderOptions,
   type TransferRequest,
 } from '../../shared/ipc';
 import type { Profile } from '../../core/profile/index';
-import type { TransferQueue } from '../../core/queue/index';
-import type { HistoryEntry, HistoryFilter, HistoryInput } from '../../core/history/index';
+import type { HistoryFilter } from '../../core/history/index';
 import type { BookmarkInput } from '../../core/bookmark/index';
-import type { AppService } from '../app-service';
-import type { KnownHostsController } from '../known-hosts-controller';
-import { listLocalDir } from '../local-fs';
-import { taskToHistoryInput } from '../history-recorder';
+import { createIpcHandlers, type IpcHandlerDeps, type IpcHandlers } from './handlers';
 
-/** 履歴の記録・参照口（永続化を内包）。 */
-export interface HistoryController {
-  append(input: HistoryInput): void;
-  list(filter?: HistoryFilter): HistoryEntry[];
-  clear(): void;
-}
+export type {
+  HistoryController,
+  IpcHandlerDeps,
+  IpcHandlers,
+  IpcQueue,
+  IpcService,
+  KnownHostsApi,
+  SettingsApi,
+} from './handlers';
 
-/** AppService のメソッドを ipcMain.handle に結線する。ここはロジックを持たない薄い層。 */
-export function registerIpc(
-  service: AppService,
-  queue: TransferQueue,
-  history: HistoryController,
-  knownHosts: KnownHostsController,
-): void {
-  let seq = 0;
-  const genId = (): string => `op${Date.now()}-${seq++}`;
-  const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+/**
+ * ハンドラ（createIpcHandlers）を ipcMain.handle へ結線するだけの層。
+ * ここにはロジックを置かない（置くとテストできなくなる）。
+ */
+export function registerIpc(deps: IpcHandlerDeps): IpcHandlers {
+  const h = createIpcHandlers(deps);
 
-  // キューは run() 実行中に新規タスクを拾わないため、投入のたびに
-  // 「未処理が無くなるまで run を回す」ドライバで駆動する。
-  // 完走後、終端タスクを id 重複排除して一度だけ履歴へ記録する（リトライ中の中間失敗を残さない）。
-  let draining = false;
-  const recorded = new Set<string>();
-  const drive = async (): Promise<void> => {
-    if (draining) return;
-    draining = true;
-    try {
-      while (queue.list().some((t) => t.status === 'queued')) {
-        await queue.run();
-      }
-    } finally {
-      draining = false;
-      for (const task of queue.list()) {
-        if ((task.status === 'succeeded' || task.status === 'failed') && !recorded.has(task.id)) {
-          recorded.add(task.id);
-          const input = taskToHistoryInput(task);
-          if (input) history.append(input);
-        }
-      }
-    }
-  };
+  ipcMain.handle(IPC.enqueueTransfer, (_e, request: TransferRequest) => h.enqueueTransfer(request));
+  ipcMain.handle(IPC.queueStatus, () => h.queueStatus());
+  ipcMain.handle(IPC.cancelAllTasks, () => h.cancelAllTasks());
+  ipcMain.handle(IPC.clearCompletedTasks, () => h.clearCompletedTasks());
+  ipcMain.handle(IPC.historyList, (_e, filter?: HistoryFilter) => h.historyList(filter));
+  ipcMain.handle(IPC.historyClear, () => h.historyClear());
 
-  ipcMain.handle(IPC.enqueueTransfer, (_e, request: TransferRequest) => {
-    const id = `t${Date.now()}-${seq++}`;
-    queue.add({ id, kind: request.kind, label: request.label, payload: request });
-    void drive();
-    return id;
-  });
-  ipcMain.handle(IPC.queueStatus, () => ({ tasks: queue.list(), overall: queue.overall() }));
-  ipcMain.handle(IPC.cancelAllTasks, () => queue.cancelAll());
-  ipcMain.handle(IPC.historyList, (_e, filter?: HistoryFilter) => history.list(filter));
-  ipcMain.handle(IPC.historyClear, () => history.clear());
-
-  ipcMain.handle(IPC.listProfiles, () => service.listProfiles());
+  ipcMain.handle(IPC.listProfiles, () => h.listProfiles());
   ipcMain.handle(IPC.saveProfile, (_e, input: Profile, options?: SaveProfileOptions) =>
-    service.saveProfile(input, options),
+    h.saveProfile(input, options),
   );
-  ipcMain.handle(IPC.deleteProfile, (_e, id: string) => service.deleteProfile(id));
-  ipcMain.handle(IPC.testConnection, (_e, id: string) => service.testConnection(id));
-  ipcMain.handle(IPC.listRemote, (_e, id: string, dir: string) => service.listRemote(id, dir));
+  ipcMain.handle(IPC.deleteProfile, (_e, id: string, options?: DeleteProfileOptions) =>
+    h.deleteProfile(id, options),
+  );
+  ipcMain.handle(IPC.getSettings, () => h.getSettings());
+  ipcMain.handle(IPC.saveSettings, (_e, settings: unknown) => h.saveSettings(settings));
+
+  ipcMain.handle(IPC.testConnection, (_e, id: string) => h.testConnection(id));
+  ipcMain.handle(IPC.listRemote, (_e, id: string, dir: string) => h.listRemote(id, dir));
   ipcMain.handle(IPC.prepareUpload, (_e, id: string, local: string, remote: string) =>
-    service.prepareUpload(id, local, remote),
+    h.prepareUpload(id, local, remote),
   );
   ipcMain.handle(
     IPC.commitUpload,
     (_e, id: string, local: string, remote: string, options?: { verifyAfterTransfer?: boolean }) =>
-      service.commitUpload(id, local, remote, options),
+      h.commitUpload(id, local, remote, options),
   );
   ipcMain.handle(
     IPC.prepareSync,
     (_e, id: string, localDir: string, remoteDir: string, options?: SyncFolderOptions) =>
-      service.prepareSync(id, localDir, remoteDir, options),
+      h.prepareSync(id, localDir, remoteDir, options),
   );
   ipcMain.handle(
     IPC.commitSync,
     (_e, id: string, localDir: string, remoteDir: string, options?: SyncFolderOptions) =>
-      service.commitSync(id, localDir, remoteDir, options),
+      h.commitSync(id, localDir, remoteDir, options),
   );
   ipcMain.handle(IPC.prepareDownload, (_e, id: string, remote: string, save: string) =>
-    service.prepareDownload(id, remote, save),
+    h.prepareDownload(id, remote, save),
   );
   ipcMain.handle(IPC.download, (_e, id: string, remote: string, save: string) =>
-    service.download(id, remote, save),
+    h.download(id, remote, save),
   );
-  ipcMain.handle(IPC.renameRemote, async (_e, id: string, from: string, to: string) => {
-    try {
-      await service.renameRemote(id, from, to);
-      history.append({ id: genId(), kind: 'rename', profileId: id, path: to, status: 'success' });
-    } catch (err) {
-      history.append({
-        id: genId(),
-        kind: 'rename',
-        profileId: id,
-        path: from,
-        status: 'failed',
-        error: errorMessage(err),
-      });
-      throw err;
-    }
-  });
-  ipcMain.handle(IPC.deleteRemote, async (_e, id: string, remote: string) => {
-    try {
-      await service.deleteRemote(id, remote);
-      history.append({ id: genId(), kind: 'delete', profileId: id, path: remote, status: 'success' });
-    } catch (err) {
-      history.append({
-        id: genId(),
-        kind: 'delete',
-        profileId: id,
-        path: remote,
-        status: 'failed',
-        error: errorMessage(err),
-      });
-      throw err;
-    }
-  });
-  ipcMain.handle(IPC.chmodRemote, async (_e, id: string, remote: string, mode: number) => {
-    try {
-      await service.chmodRemote(id, remote, mode);
-      history.append({ id: genId(), kind: 'chmod', profileId: id, path: remote, status: 'success' });
-    } catch (err) {
-      history.append({
-        id: genId(),
-        kind: 'chmod',
-        profileId: id,
-        path: remote,
-        status: 'failed',
-        error: errorMessage(err),
-      });
-      throw err;
-    }
-  });
-  ipcMain.handle(IPC.listBookmarks, (_e, profileId?: string) => service.listBookmarks(profileId));
-  ipcMain.handle(IPC.addBookmark, (_e, input: BookmarkInput) => service.addBookmark(input));
-  ipcMain.handle(IPC.removeBookmark, (_e, id: string) => service.removeBookmark(id));
-  ipcMain.handle(IPC.renameBookmark, (_e, id: string, name: string) =>
-    service.renameBookmark(id, name),
+  ipcMain.handle(IPC.renameRemote, (_e, id: string, from: string, to: string) =>
+    h.renameRemote(id, from, to),
   );
-  ipcMain.handle(IPC.listBackups, (_e, id: string, remote: string) =>
-    service.listBackups(id, remote),
+  ipcMain.handle(IPC.deleteRemote, (_e, id: string, remote: string) => h.deleteRemote(id, remote));
+  ipcMain.handle(IPC.chmodRemote, (_e, id: string, remote: string, mode: number) =>
+    h.chmodRemote(id, remote, mode),
   );
-  ipcMain.handle(IPC.restoreBackup, (_e, id: string, remote: string, ts?: Date) =>
-    service.restoreBackup(id, remote, ts ? new Date(ts) : undefined),
-  );
-  ipcMain.handle(IPC.listKnownHosts, () => knownHosts.list());
-  ipcMain.handle(IPC.removeKnownHost, (_e, host: string, port: number) =>
-    knownHosts.remove(host, port),
-  );
-  ipcMain.handle(IPC.isSecretStorageAvailable, () => safeStorage.isEncryptionAvailable());
-  ipcMain.handle(IPC.listLocal, (_e, dir: string) => listLocalDir(dir));
-  ipcMain.handle(IPC.homeDir, () => homedir());
 
-  ipcMain.handle(IPC.pickFile, async () => {
-    const result = await dialog.showOpenDialog({ properties: ['openFile'] });
-    return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0];
-  });
-  ipcMain.handle(IPC.pickDirectory, async () => {
-    const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });
-    return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0];
-  });
-  ipcMain.handle(IPC.pickSavePath, async (_e, defaultName: string) => {
-    const result = await dialog.showSaveDialog({ defaultPath: defaultName });
-    return result.canceled || !result.filePath ? null : result.filePath;
-  });
+  ipcMain.handle(IPC.listBookmarks, (_e, profileId?: string) => h.listBookmarks(profileId));
+  ipcMain.handle(IPC.addBookmark, (_e, input: BookmarkInput) => h.addBookmark(input));
+  ipcMain.handle(IPC.removeBookmark, (_e, id: string) => h.removeBookmark(id));
+  ipcMain.handle(IPC.renameBookmark, (_e, id: string, name: string) => h.renameBookmark(id, name));
+  ipcMain.handle(IPC.listBackups, (_e, id: string, remote: string) => h.listBackups(id, remote));
+  ipcMain.handle(IPC.restoreBackup, (_e, id: string, remote: string, ts?: Date) =>
+    h.restoreBackup(id, remote, ts),
+  );
+  ipcMain.handle(IPC.listKnownHosts, () => h.listKnownHosts());
+  ipcMain.handle(IPC.removeKnownHost, (_e, host: string, port: number) =>
+    h.removeKnownHost(host, port),
+  );
+
+  ipcMain.handle(IPC.isSecretStorageAvailable, () => h.isSecretStorageAvailable());
+  ipcMain.handle(IPC.listLocal, (_e, dir: string) => h.listLocal(dir));
+  ipcMain.handle(IPC.homeDir, () => h.homeDir());
+  ipcMain.handle(IPC.pickFile, () => h.pickFile());
+  ipcMain.handle(IPC.pickDirectory, () => h.pickDirectory());
+  ipcMain.handle(IPC.pickSavePath, (_e, defaultName: string) => h.pickSavePath(defaultName));
+
+  return h;
 }

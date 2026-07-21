@@ -51,6 +51,11 @@ export interface S3Profile {
   bucket: string;
   /** 識別子。ユーザー名相当のため保存する。 */
   accessKeyId?: string;
+  /**
+   * 資格情報未設定時に AWS SDK の既定チェーン（環境変数 / ~/.aws / IMDS）を使うか。
+   * 明示オプトインした場合のみ true。既定（未設定）では接続を拒否する。
+   */
+  useDefaultCredentials?: boolean;
   /** 接続タイムアウト（ミリ秒）。 */
   connectTimeoutMs?: number;
   /** 切断検知時に自動再接続を試みるか。 */

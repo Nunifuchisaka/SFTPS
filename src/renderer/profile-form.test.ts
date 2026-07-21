@@ -94,3 +94,30 @@ describe('buildClearSecretsFromForm', () => {
     expect(buildClearSecretsFromForm(fv)).toEqual(['secretAccessKey']);
   });
 });
+
+describe('S3 default credential chain opt-in', () => {
+  it('defaults to off for a new profile (no implicit machine credentials)', () => {
+    expect(emptyFormValues().useDefaultCredentials).toBe(false);
+  });
+
+  it('loads the opt-in from an existing profile', () => {
+    const fv = profileToFormValues({ ...s3, useDefaultCredentials: true });
+    expect(fv.useDefaultCredentials).toBe(true);
+  });
+
+  it('writes the opt-in back only when it is enabled', () => {
+    const on = buildProfileFromForm({
+      ...profileToFormValues(s3),
+      useDefaultCredentials: true,
+    }) as S3Profile;
+    expect(on.useDefaultCredentials).toBe(true);
+
+    const off = buildProfileFromForm(profileToFormValues(s3)) as S3Profile;
+    expect(off).not.toHaveProperty('useDefaultCredentials');
+  });
+
+  it('never leaks the opt-in into non-s3 profiles', () => {
+    const p = buildProfileFromForm({ ...profileToFormValues(ftp), useDefaultCredentials: true });
+    expect(p).not.toHaveProperty('useDefaultCredentials');
+  });
+});

@@ -18,6 +18,7 @@ import {
   type S3Profile,
   type SftpProfile,
 } from '../core/profile/index';
+import { resolveS3Credentials } from '../core/profile/s3-credentials';
 import type { HostVerifierFn } from '../core/hostkey/index';
 
 export type Secrets = Record<string, string>;
@@ -95,18 +96,16 @@ export function buildSftpConnectConfig(
   return config;
 }
 
-/** S3Client のコンストラクタへ渡す設定を組み立てる。シークレット未設定なら既定の資格情報チェーンに委ねる。 */
+/**
+ * S3Client のコンストラクタへ渡す設定を組み立てる。
+ * 資格情報が未設定で「マシンの既定資格情報を使う」もオフなら、
+ * 既定チェーン（環境変数 / ~/.aws / IMDS）へ黙って落ちずに接続を拒否する。
+ */
 export function buildS3ClientConfig(profile: S3Profile, secrets: Secrets): S3ClientConfig {
   const config: S3ClientConfig = { region: profile.region };
-  if (profile.accessKeyId && secrets.secretAccessKey) {
-    config.credentials = {
-      accessKeyId: profile.accessKeyId,
-      secretAccessKey: secrets.secretAccessKey,
-    };
-    if (secrets.sessionToken) {
-      config.credentials.sessionToken = secrets.sessionToken;
-    }
-  }
+  const resolved = resolveS3Credentials(profile, secrets);
+  if (resolved.mode === 'missing') throw new Error(resolved.reason);
+  if (resolved.mode === 'explicit') config.credentials = resolved.credentials;
   if (profile.connectTimeoutMs !== undefined) {
     config.requestHandler = {
       connectionTimeout: profile.connectTimeoutMs,

@@ -98,3 +98,22 @@ describe('history JSON round-trip', () => {
     expect(json).not.toContain('password');
   });
 });
+
+describe('HistoryStore removeByProfile', () => {
+  it('drops only the entries of the given profile and reports the count', () => {
+    const store = new HistoryStore();
+    store.append(input({ id: 'a', profileId: 'p1' }));
+    store.append(input({ id: 'b', profileId: 'p2' }));
+    store.append(input({ id: 'c', profileId: 'p1' }));
+
+    expect(store.removeByProfile('p1')).toBe(2);
+    expect(store.list().map((e) => e.id)).toEqual(['b']);
+  });
+
+  it('returns 0 when nothing matches', () => {
+    const store = new HistoryStore();
+    store.append(input({ id: 'a', profileId: 'p1' }));
+    expect(store.removeByProfile('nope')).toBe(0);
+    expect(store.list()).toHaveLength(1);
+  });
+});

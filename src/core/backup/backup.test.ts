@@ -135,3 +135,97 @@ describe('BackupManager', () => {
     expect(await mgr.listBackups('p/download', '/f.txt')).toHaveLength(1);
   });
 });
+
+describe('BackupManager retention policy', () => {
+  let backupRoot: string;
+  let remoteRoot: string;
+  let transport: LocalTransport;
+
+  beforeEach(async () => {
+    backupRoot = await mkdtemp(join(tmpdir(), 'sftps-backup-ret-'));
+    remoteRoot = await mkdtemp(join(tmpdir(), 'sftps-remote-ret-'));
+    transport = new LocalTransport(remoteRoot);
+    await transport.connect();
+  });
+
+  afterEach(async () => {
+    await rm(backupRoot, { recursive: true, force: true });
+    await rm(remoteRoot, { recursive: true, force: true });
+  });
+
+  it('drops generations older than maxAgeDays when rotating', async () => {
+    let clock = new Date('2026-01-01T00:00:00.000Z');
+    const mgr = new BackupManager({ backupRoot, maxAgeDays: 7, now: () => clock });
+    await transport.writeFile('/pub/.env', Buffer.from('SECRET=1'));
+    await mgr.backupExisting(transport, 'p1', '/pub/.env');
+
+    clock = new Date('2026-01-20T00:00:00.000Z');
+    await transport.writeFile('/pub/.env', Buffer.from('SECRET=2'));
+    await mgr.backupExisting(transport, 'p1', '/pub/.env');
+
+    const list = await mgr.listBackups('p1', '/pub/.env');
+    expect(list).toHaveLength(1);
+    expect(list[0].timestamp.toISOString()).toBe('2026-01-20T00:00:00.000Z');
+  });
+
+  it('setRetention changes the policy at runtime', async () => {
+    let clock = new Date('2026-01-01T00:00:00.000Z');
+    const mgr = new BackupManager({ backupRoot, now: () => clock });
+    for (const v of ['a', 'b', 'c']) {
+      await transport.writeFile('/x.txt', Buffer.from(v));
+      await mgr.backupExisting(transport, 'p1', '/x.txt');
+      clock = new Date(clock.getTime() + 1000);
+    }
+    expect(await mgr.listBackups('p1', '/x.txt')).toHaveLength(3);
+
+    mgr.setRetention({ maxGenerations: 1 });
+    await transport.writeFile('/x.txt', Buffer.from('d'));
+    await mgr.backupExisting(transport, 'p1', '/x.txt');
+    expect(await mgr.listBackups('p1', '/x.txt')).toHaveLength(1);
+  });
+
+  it('pruneExpired sweeps every namespace, not just the one being written', async () => {
+    let clock = new Date('2026-01-01T00:00:00.000Z');
+    const mgr = new BackupManager({ backupRoot, now: () => clock });
+    await transport.writeFile('/a.txt', Buffer.from('a'));
+    await mgr.backupExisting(transport, 'p1', '/a.txt');
+    await transport.writeFile('/b.txt', Buffer.from('b'));
+    await mgr.backupExisting(transport, 'p2/download', '/b.txt');
+
+    clock = new Date('2026-03-01T00:00:00.000Z');
+    mgr.setRetention({ maxAgeDays: 7 });
+    expect(await mgr.pruneExpired()).toBe(2);
+    expect(await mgr.listBackups('p1', '/a.txt')).toEqual([]);
+    expect(await mgr.listBackups('p2/download', '/b.txt')).toEqual([]);
+  });
+
+  it('pruneExpired keeps generations inside the policy', async () => {
+    const mgr = new BackupManager({ backupRoot, maxAgeDays: 30, now: () => new Date('2026-01-01T00:00:00.000Z') });
+    await transport.writeFile('/a.txt', Buffer.from('a'));
+    await mgr.backupExisting(transport, 'p1', '/a.txt');
+    expect(await mgr.pruneExpired()).toBe(0);
+    expect(await mgr.listBackups('p1', '/a.txt')).toHaveLength(1);
+  });
+
+  it('purgeNamespace deletes every backup of a profile (upload and download)', async () => {
+    const mgr = new BackupManager({ backupRoot, now: () => new Date('2026-01-01T00:00:00.000Z') });
+    await transport.writeFile('/a.txt', Buffer.from('a'));
+    await mgr.backupExisting(transport, 'p1', '/a.txt');
+    await mgr.backupExisting(transport, 'p1/download', '/a.txt');
+    await mgr.backupExisting(transport, 'p2', '/a.txt');
+
+    await mgr.purgeNamespace('p1');
+    expect(await mgr.listBackups('p1', '/a.txt')).toEqual([]);
+    expect(await mgr.listBackups('p1/download', '/a.txt')).toEqual([]);
+    expect(await mgr.listBackups('p2', '/a.txt')).toHaveLength(1);
+  });
+
+  it('purgeNamespace is a no-op for an unknown namespace and cannot escape the backup root', async () => {
+    const mgr = new BackupManager({ backupRoot, now: () => new Date('2026-01-01T00:00:00.000Z') });
+    await transport.writeFile('/a.txt', Buffer.from('a'));
+    await mgr.backupExisting(transport, 'p1', '/a.txt');
+    await expect(mgr.purgeNamespace('nope')).resolves.toBeUndefined();
+    await mgr.purgeNamespace('../..');
+    expect(await mgr.listBackups('p1', '/a.txt')).toHaveLength(1);
+  });
+});

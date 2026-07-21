@@ -99,3 +99,45 @@ describe('upload coordinator (integration, real file I/O)', () => {
     expect((await transport.readFile('/v.txt')).toString('utf8')).toBe('verify-me');
   });
 });
+
+describe('prepareUpload diff size limit', () => {
+  let localDir: string;
+  let remoteDir: string;
+  let transport: LocalTransport;
+
+  beforeEach(async () => {
+    localDir = await mkdtemp(join(tmpdir(), 'sftps-up-lim-local-'));
+    remoteDir = await mkdtemp(join(tmpdir(), 'sftps-up-lim-remote-'));
+    transport = new LocalTransport(remoteDir);
+    await transport.connect();
+  });
+
+  afterEach(async () => {
+    await rm(localDir, { recursive: true, force: true });
+    await rm(remoteDir, { recursive: true, force: true });
+  });
+
+  it('falls back to a size comparison when the file is over the limit', async () => {
+    const localPath = join(localDir, 'big.txt');
+    await fsWriteFile(localPath, Buffer.from('b'.repeat(50), 'utf8'));
+    await transport.writeFile('/big.txt', Buffer.from('a'.repeat(40), 'utf8'));
+
+    const preview = await prepareUpload(transport, localPath, '/big.txt', { maxDiffBytes: 30 });
+    expect(preview.tooLarge).toBe(true);
+    expect(preview.diffLimitBytes).toBe(30);
+    expect(preview.beforeSize).toBe(40);
+    expect(preview.afterSize).toBe(50);
+    expect(preview.segments).toBeUndefined();
+    expect(preview.binary).toBe(false);
+  });
+
+  it('still produces a character diff under the limit', async () => {
+    const localPath = join(localDir, 'small.txt');
+    await fsWriteFile(localPath, Buffer.from('axc', 'utf8'));
+    await transport.writeFile('/small.txt', Buffer.from('abc', 'utf8'));
+
+    const preview = await prepareUpload(transport, localPath, '/small.txt', { maxDiffBytes: 1000 });
+    expect(preview.tooLarge).toBeFalsy();
+    expect(preview.summary).toEqual({ added: 1, removed: 1 });
+  });
+});

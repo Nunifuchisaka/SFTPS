@@ -30,6 +30,8 @@ export interface FormValues {
   bucket: string;
   accessKeyId: string;
   secretAccessKey: string;
+  /** S3: 資格情報未設定時にマシンの既定資格情報チェーンを使う明示オプトイン。 */
+  useDefaultCredentials: boolean;
   /** 接続タイムアウト（ミリ秒）。空文字＝未設定。 */
   connectTimeoutMs: string;
   autoReconnect: boolean;
@@ -55,6 +57,7 @@ export function emptyFormValues(): FormValues {
     bucket: '',
     accessKeyId: '',
     secretAccessKey: '',
+    useDefaultCredentials: false,
     connectTimeoutMs: '',
     autoReconnect: false,
     clearSecrets: [],
@@ -96,6 +99,7 @@ export function profileToFormValues(profile: Profile): FormValues {
     fv.region = profile.region;
     fv.bucket = profile.bucket;
     fv.accessKeyId = profile.accessKeyId ?? '';
+    fv.useDefaultCredentials = profile.useDefaultCredentials ?? false;
   }
   return fv;
 }
@@ -148,6 +152,7 @@ export function buildProfileFromForm(v: FormValues): Profile {
     bucket: v.bucket,
     ...common,
     ...(v.accessKeyId ? { accessKeyId: v.accessKeyId } : {}),
+    ...(v.useDefaultCredentials ? { useDefaultCredentials: true } : {}),
     ...(v.secretAccessKey ? { secretAccessKey: v.secretAccessKey } : {}),
   };
 }

@@ -76,6 +76,13 @@ export class BookmarkStore {
     this.bookmarks = this.bookmarks.filter((b) => b.id !== id);
   }
 
+  /** 指定プロファイルのブックマークを削除し、削除件数を返す（プロファイル削除時の掃除用）。 */
+  removeByProfile(profileId: string): number {
+    const before = this.bookmarks.length;
+    this.bookmarks = this.bookmarks.filter((b) => b.profileId !== profileId);
+    return before - this.bookmarks.length;
+  }
+
   /** 追加順に返す（profileId 指定時はそのプロファイル分のみ）。 */
   list(profileId?: string): Bookmark[] {
     return this.bookmarks

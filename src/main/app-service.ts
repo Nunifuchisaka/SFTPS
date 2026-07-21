@@ -17,6 +17,9 @@ import {
   validateProfile,
   type Profile,
 } from '../core/profile/index';
+import { planProfileDeletion } from '../core/profile/deletion';
+import type { KnownHostEntry } from '../core/hostkey/index';
+import { DEFAULT_SETTINGS, type AppSettings } from '../core/settings/index';
 import {
   prepareUpload as corePrepareUpload,
   commitUpload as coreCommitUpload,
@@ -35,6 +38,8 @@ import type { ProfileStore } from './profile-store';
 import type { Secrets } from './transport-factory';
 import type {
   ConnectionResult,
+  DeleteProfileOptions,
+  DeleteProfileResult,
   RestoreBackupResult,
   SaveProfileOptions,
   SyncFolderOptions,
@@ -61,13 +66,32 @@ export interface BookmarkGateway {
   save(store: BookmarkStore): Promise<void>;
 }
 
+/** 履歴のうち、プロファイル削除時の掃除に必要な操作だけを表す構造型。 */
+export interface HistoryGateway {
+  removeByProfile(profileId: string): number;
+}
+
+/** 信頼済みホスト鍵のうち、プロファイル削除時の掃除に必要な操作だけを表す構造型。 */
+export interface KnownHostsGateway {
+  list(): KnownHostEntry[];
+  remove(host: string, port: number): Promise<boolean>;
+}
+
 export interface AppServiceDeps {
   profileStore: ProfileStore;
   secretStore: SecretStore;
   backupManager: BackupManager;
   bookmarkStore: BookmarkGateway;
   createTransport: (profile: Profile, secrets: Secrets) => RemoteTransport;
+  /** 転送履歴（プロファイル削除時の掃除に使う。未指定なら履歴は掃除しない）。 */
+  historyStore?: HistoryGateway;
+  /** 信頼済みホスト鍵（同上）。 */
+  knownHosts?: KnownHostsGateway;
+  /** 現在のアプリ設定を返す（差分上限などに使う。未指定なら既定値）。 */
+  settings?: () => AppSettings;
 }
+
+export type { DeleteProfileOptions, DeleteProfileResult };
 
 /**
  * IPC ハンドラの中身となる純粋なアプリケーションサービス。
@@ -111,10 +135,57 @@ export class AppService {
     return stripped;
   }
 
-  async deleteProfile(id: string): Promise<void> {
+  /**
+   * プロファイルを削除する。プロファイル JSON とシークレットは常に消す。
+   * ブックマーク・履歴・ホスト鍵（＝削除した接続先のパス情報）は removeRelatedData、
+   * バックアップ（＝復旧手段でもあるファイル実体）は removeBackups の明示同意がある場合のみ消す。
+   */
+  async deleteProfile(
+    id: string,
+    options: DeleteProfileOptions = {},
+  ): Promise<DeleteProfileResult> {
     const profiles = await this.deps.profileStore.list();
+    // 不正な id はここで弾く（消し込み対象がパスとして使われるため、着手前に検証する）。
+    const plan = planProfileDeletion(id, {
+      profiles,
+      knownHosts: this.deps.knownHosts?.list() ?? [],
+      ...(options.removeRelatedData !== undefined
+        ? { removeRelatedData: options.removeRelatedData }
+        : {}),
+      ...(options.removeBackups !== undefined ? { removeBackups: options.removeBackups } : {}),
+    });
+
     await this.deps.profileStore.saveAll(profiles.filter((p) => p.id !== id));
     await this.deps.secretStore.deleteSecrets(id);
+
+    const result: DeleteProfileResult = {
+      removedBookmarks: 0,
+      removedHistory: 0,
+      removedKnownHosts: 0,
+      purgedBackupNamespaces: 0,
+    };
+
+    if (plan.removeBookmarks) {
+      const store = await this.deps.bookmarkStore.load();
+      result.removedBookmarks = store.removeByProfile(id);
+      if (result.removedBookmarks > 0) await this.deps.bookmarkStore.save(store);
+    }
+    if (plan.removeHistory) {
+      result.removedHistory = this.deps.historyStore?.removeByProfile(id) ?? 0;
+    }
+    for (const host of plan.removeKnownHosts) {
+      if (await this.deps.knownHosts?.remove(host.host, host.port)) result.removedKnownHosts++;
+    }
+    for (const namespace of plan.backupNamespaces) {
+      await this.deps.backupManager.purgeNamespace(namespace);
+      result.purgedBackupNamespaces++;
+    }
+    return result;
+  }
+
+  /** 現在の設定（未注入なら既定値）。 */
+  private settings(): AppSettings {
+    return this.deps.settings?.() ?? DEFAULT_SETTINGS;
   }
 
   async testConnection(id: string): Promise<ConnectionResult> {
@@ -131,8 +202,9 @@ export class AppService {
   }
 
   async prepareUpload(id: string, localPath: string, remotePath: string): Promise<UploadPreview> {
+    const maxDiffBytes = this.settings().diff.maxBytes;
     return this.withTransport(id, (transport) =>
-      corePrepareUpload(transport, localPath, remotePath),
+      corePrepareUpload(transport, localPath, remotePath, { maxDiffBytes }),
     );
   }
 
@@ -240,8 +312,9 @@ export class AppService {
   /** ダウンロード差分プレビュー（before=既存ローカル, after=リモート新内容）。 */
   async prepareDownload(id: string, remotePath: string, savePath: string): Promise<DownloadPreview> {
     const { local, localPath } = await this.openLocalTarget(savePath);
+    const maxDiffBytes = this.settings().diff.maxBytes;
     return this.withTransport(id, (remote) =>
-      corePrepareDownload(remote, local, remotePath, localPath),
+      corePrepareDownload(remote, local, remotePath, localPath, { maxDiffBytes }),
     );
   }
 

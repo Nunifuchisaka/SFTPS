@@ -8,6 +8,23 @@ import type { OverallProgress, TransferTask } from '../core/queue/index';
 import type { HistoryEntry, HistoryFilter } from '../core/history/index';
 import type { Bookmark, BookmarkInput } from '../core/bookmark/index';
 import type { KnownHostEntry } from '../core/hostkey/index';
+import type { AppSettings } from '../core/settings/index';
+
+export type { AppSettings };
+
+export interface DeleteProfileOptions {
+  /** ブックマーク・履歴・ホスト鍵も削除するか（ユーザーの明示同意）。 */
+  removeRelatedData?: boolean;
+  /** バックアップも削除するか（復旧手段を失うため別途の明示同意）。 */
+  removeBackups?: boolean;
+}
+
+export interface DeleteProfileResult {
+  removedBookmarks: number;
+  removedHistory: number;
+  removedKnownHosts: number;
+  purgedBackupNamespaces: number;
+}
 
 export interface ConnectionResult {
   ok: boolean;
@@ -76,6 +93,7 @@ export const IPC = {
   enqueueTransfer: 'queue:enqueue',
   queueStatus: 'queue:status',
   cancelAllTasks: 'queue:cancelAll',
+  clearCompletedTasks: 'queue:clearCompleted',
   prepareDownload: 'remote:prepareDownload',
   download: 'remote:download',
   renameRemote: 'remote:rename',
@@ -91,6 +109,8 @@ export const IPC = {
   restoreBackup: 'backup:restore',
   listKnownHosts: 'hostkey:list',
   removeKnownHost: 'hostkey:remove',
+  getSettings: 'settings:get',
+  saveSettings: 'settings:save',
   isSecretStorageAvailable: 'secret:available',
   listLocal: 'local:list',
   homeDir: 'local:home',
@@ -106,7 +126,11 @@ export const IPC = {
 export interface SftpsApi {
   listProfiles(): Promise<Profile[]>;
   saveProfile(input: Profile, options?: SaveProfileOptions): Promise<Profile>;
-  deleteProfile(id: string): Promise<void>;
+  /**
+   * プロファイルを削除する。関連データ（ブックマーク・履歴・ホスト鍵）と
+   * バックアップは、それぞれ options の明示指定がある場合のみ削除する。
+   */
+  deleteProfile(id: string, options?: DeleteProfileOptions): Promise<DeleteProfileResult>;
   testConnection(id: string): Promise<ConnectionResult>;
   listRemote(id: string, remoteDir: string): Promise<RemoteEntry[]>;
   prepareUpload(id: string, localPath: string, remotePath: string): Promise<UploadPreview>;
@@ -131,6 +155,8 @@ export interface SftpsApi {
   enqueueTransfer(request: TransferRequest): Promise<string>;
   queueStatus(): Promise<QueueStatus>;
   cancelAllTasks(): Promise<void>;
+  /** 完了（成功/失敗/キャンセル）タスクをキューから破棄する。戻り値は破棄件数。 */
+  clearCompletedTasks(): Promise<number>;
   prepareDownload(id: string, remotePath: string, savePath: string): Promise<DownloadPreview>;
   download(id: string, remotePath: string, savePath: string): Promise<DownloadResult>;
   renameRemote(id: string, from: string, to: string): Promise<void>;
@@ -148,6 +174,10 @@ export interface SftpsApi {
   listKnownHosts(): Promise<KnownHostEntry[]>;
   /** 信頼済みホスト鍵を削除する。次回接続時に指紋の確認をやり直す。 */
   removeKnownHost(host: string, port: number): Promise<boolean>;
+  /** アプリ設定（バックアップ保持ポリシー・差分プレビュー上限）を取得する。 */
+  getSettings(): Promise<AppSettings>;
+  /** アプリ設定を保存する。値は main 側で正規化され、保存後の値が返る。 */
+  saveSettings(settings: AppSettings): Promise<AppSettings>;
   isSecretStorageAvailable(): Promise<boolean>;
   listLocal(dir: string): Promise<RemoteEntry[]>;
   homeDir(): Promise<string>;

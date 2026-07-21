@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LocalTransport } from '../core/transport/index';
 import { BackupManager } from '../core/backup/index';
+import { HistoryStore } from '../core/history/index';
+import { KnownHostsStore } from '../core/hostkey/index';
 import type { FtpProfile, SftpProfile } from '../core/profile/index';
 import { SecretStore, type SafeStorageLike } from './secret-store';
 import { ProfileStore } from './profile-store';
@@ -474,5 +476,187 @@ describe('AppService', () => {
       service.addBookmark({ id: 'b1', profileId: 'p1', name: '   ', remotePath: '/a' }),
     ).rejects.toThrow();
     expect(await service.listBookmarks()).toEqual([]);
+  });
+});
+
+describe('AppService profile deletion cleanup', () => {
+  let dir: string;
+  let backupRoot: string;
+  let service: AppService;
+  let transport: LocalTransport;
+  let history: HistoryStore;
+  let knownHosts: KnownHostsStore;
+  let removedHosts: Array<{ host: string; port: number }>;
+
+  const target: SftpProfile = {
+    id: 'del1',
+    name: 'to delete',
+    protocol: 'sftp',
+    host: 'del.example',
+    port: 22,
+    user: 'u',
+    password: 'pw',
+  };
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'sftps-del-'));
+    backupRoot = join(dir, 'backups');
+    transport = new LocalTransport(join(dir, 'remote'));
+    history = new HistoryStore();
+    knownHosts = new KnownHostsStore({ 'del.example:22': 'SHA256:aaa' });
+    removedHosts = [];
+
+    let clock = 0;
+    service = new AppService({
+      profileStore: new ProfileStore(join(dir, 'profiles.json')),
+      secretStore: new SecretStore({
+        safeStorage: new FakeSafeStorage(),
+        filePath: join(dir, 'secrets.json'),
+      }),
+      bookmarkStore: new BookmarkFile(join(dir, 'bookmarks.json')),
+      backupManager: new BackupManager({
+        backupRoot,
+        now: () => new Date(Date.UTC(2026, 0, 1, 0, 0, clock++)),
+      }),
+      createTransport: () => transport,
+      historyStore: history,
+      knownHosts: {
+        list: () => knownHosts.list(),
+        remove: async (host, port) => {
+          removedHosts.push({ host, port });
+          return knownHosts.remove(host, port);
+        },
+      },
+    });
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  async function seed(): Promise<void> {
+    await service.saveProfile(target);
+    await service.addBookmark({ id: 'b1', profileId: 'del1', name: 'pub', remotePath: '/pub' });
+    await service.addBookmark({ id: 'b2', profileId: 'keep', name: 'other', remotePath: '/pub' });
+    history.append({ id: 'h1', kind: 'upload', profileId: 'del1', path: '/a', status: 'success' });
+    history.append({ id: 'h2', kind: 'upload', profileId: 'keep', path: '/a', status: 'success' });
+    await transport.connect();
+    await transport.writeFile('/a.txt', Buffer.from('OLD'));
+    const localPath = join(dir, 'a.txt');
+    await writeLocal(localPath, Buffer.from('NEW', 'utf8'));
+    await service.commitUpload('del1', localPath, '/a.txt');
+  }
+
+  it('leaves related data untouched by default (least surprise)', async () => {
+    await seed();
+    const result = await service.deleteProfile('del1');
+    expect(await service.listProfiles()).toEqual([]);
+    expect(result).toEqual({
+      removedBookmarks: 0,
+      removedHistory: 0,
+      removedKnownHosts: 0,
+      purgedBackupNamespaces: 0,
+    });
+    expect((await service.listBookmarks('del1')).map((b) => b.id)).toEqual(['b1']);
+    expect(history.list()).toHaveLength(2);
+    expect(knownHosts.list()).toHaveLength(1);
+  });
+
+  it('removes bookmarks, history and the host key when related data removal is requested', async () => {
+    await seed();
+    const result = await service.deleteProfile('del1', { removeRelatedData: true });
+    expect(result.removedBookmarks).toBe(1);
+    expect(result.removedHistory).toBe(1);
+    expect(result.removedKnownHosts).toBe(1);
+    expect((await service.listBookmarks()).map((b) => b.id)).toEqual(['b2']);
+    expect(history.list().map((e) => e.id)).toEqual(['h2']);
+    expect(removedHosts).toEqual([{ host: 'del.example', port: 22 }]);
+    expect(knownHosts.list()).toEqual([]);
+  });
+
+  it('keeps backups unless they are explicitly requested (they are a recovery path)', async () => {
+    await seed();
+    await service.deleteProfile('del1', { removeRelatedData: true });
+    expect(existsSync(join(backupRoot, 'del1'))).toBe(true);
+  });
+
+  it('purges the backup namespaces when backup removal is requested', async () => {
+    await seed();
+    const result = await service.deleteProfile('del1', {
+      removeRelatedData: true,
+      removeBackups: true,
+    });
+    expect(result.purgedBackupNamespaces).toBe(2);
+    expect(existsSync(join(backupRoot, 'del1'))).toBe(false);
+  });
+
+  it('rejects a traversal-shaped profile id before deleting anything', async () => {
+    await seed();
+    await expect(service.deleteProfile('../../etc', { removeBackups: true })).rejects.toThrow(
+      /invalid profile id/,
+    );
+    expect(await service.listProfiles()).toHaveLength(1);
+  });
+});
+
+describe('AppService diff size limit', () => {
+  let dir: string;
+  let service: AppService;
+  let transport: LocalTransport;
+  let maxBytes: number;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'sftps-difflimit-'));
+    transport = new LocalTransport(join(dir, 'remote'));
+    maxBytes = 16;
+    service = new AppService({
+      profileStore: new ProfileStore(join(dir, 'profiles.json')),
+      secretStore: new SecretStore({
+        safeStorage: new FakeSafeStorage(),
+        filePath: join(dir, 'secrets.json'),
+      }),
+      bookmarkStore: new BookmarkFile(join(dir, 'bookmarks.json')),
+      backupManager: new BackupManager({ backupRoot: join(dir, 'backups') }),
+      createTransport: () => transport,
+      settings: () => ({ backup: { maxGenerations: 20, maxAgeDays: null }, diff: { maxBytes } }),
+    });
+    await service.saveProfile(ftpProfile);
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('skips the character diff on upload preview when over the configured limit', async () => {
+    await transport.connect();
+    await transport.writeFile('/big.txt', Buffer.from('a'.repeat(100), 'utf8'));
+    const localPath = join(dir, 'big.txt');
+    await writeLocal(localPath, Buffer.from('b'.repeat(100), 'utf8'));
+
+    const preview = await service.prepareUpload('p1', localPath, '/big.txt');
+    expect(preview.tooLarge).toBe(true);
+    expect(preview.diffLimitBytes).toBe(16);
+  });
+
+  it('skips the character diff on download preview when over the configured limit', async () => {
+    await transport.connect();
+    await transport.writeFile('/big.txt', Buffer.from('a'.repeat(100), 'utf8'));
+    const savePath = join(dir, 'local', 'big.txt');
+    await writeLocal(savePath, Buffer.from('b'.repeat(100), 'utf8'));
+
+    const preview = await service.prepareDownload('p1', '/big.txt', savePath);
+    expect(preview.tooLarge).toBe(true);
+  });
+
+  it('still diffs normally when the content fits the limit', async () => {
+    maxBytes = 1024;
+    await transport.connect();
+    await transport.writeFile('/s.txt', Buffer.from('abc', 'utf8'));
+    const localPath = join(dir, 's.txt');
+    await writeLocal(localPath, Buffer.from('axc', 'utf8'));
+
+    const preview = await service.prepareUpload('p1', localPath, '/s.txt');
+    expect(preview.tooLarge).toBeFalsy();
+    expect(preview.summary).toEqual({ added: 1, removed: 1 });
   });
 });

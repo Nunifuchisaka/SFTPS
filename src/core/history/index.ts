@@ -96,6 +96,13 @@ export class HistoryStore {
     this.entries = [];
   }
 
+  /** 指定プロファイルの履歴を削除し、削除件数を返す（プロファイル削除時の掃除用）。 */
+  removeByProfile(profileId: string): number {
+    const before = this.entries.length;
+    this.entries = this.entries.filter((e) => e.profileId !== profileId);
+    return before - this.entries.length;
+  }
+
   toData(): HistoryEntry[] {
     return this.entries.map((e) => ({ ...e }));
   }

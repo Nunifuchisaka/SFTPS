@@ -27,11 +27,13 @@ import { classifyConnectionError, connectionErrorMessageKey } from '../core/reco
 import { normalizeThemeSetting, THEME_SETTINGS, type ThemeSetting } from '../core/theme/index';
 import { applyTheme } from './theme';
 import type {
+  AppSettings,
   PrepareSyncResult,
   QueueStatus,
   SaveProfileOptions,
   SyncFolderOptions,
 } from '../shared/ipc';
+import { DEFAULT_SETTINGS } from '../core/settings/index';
 import { createDiffView, diffOrientationLabels } from './diff-view';
 import { createSyncPlanView } from './sync-view';
 import { buildUploadRequests, buildRequestsFromDropTargets } from './bulk-transfer';
@@ -98,6 +100,7 @@ interface State {
   bookmarks: Bookmark[];
   bookmarkName: string;
   knownHosts: KnownHostEntry[];
+  settings: AppSettings;
 }
 
 export function mountApp(root: string | HTMLElement): void {
@@ -128,6 +131,7 @@ export function mountApp(root: string | HTMLElement): void {
     bookmarks: [],
     bookmarkName: '',
     knownHosts: [],
+    settings: DEFAULT_SETTINGS,
   };
 
   let bookmarkSeq = 0;
@@ -152,6 +156,7 @@ export function mountApp(root: string | HTMLElement): void {
   const secretWarn = h('div', { class: 'warn_1', hidden: true });
   const profilePanel = h('div', { class: 'panel_1' });
   const knownHostsPanel = h('div', { class: 'panel_1' });
+  const settingsPanel = h('div', { class: 'panel_1' });
   const localPanel = h('div', { class: 'browser_1' });
   const remotePanel = h('div', { class: 'browser_1' });
   const transferPanel = h('div', { class: 'transfer_1' });
@@ -281,6 +286,9 @@ export function mountApp(root: string | HTMLElement): void {
     const bucketIn = input(fv.bucket, 'バケット');
     const akidIn = input(fv.accessKeyId, 'Access Key ID');
     const secretIn = input('', editing ? 'Secret Access Key（変更時のみ）' : 'Secret Access Key', 'password');
+    // 既定チェーン（環境変数 / ~/.aws / IMDS）へ暗黙に落ちないよう、明示オプトインにする。
+    const defaultCredsIn = h('input', { type: 'checkbox' }) as HTMLInputElement;
+    defaultCredsIn.checked = fv.useDefaultCredentials;
 
     // 空欄は「据え置き」。保存済みシークレットを消すのはこの明示チェックのみ（編集時のみ表示）。
     const clearChecks = new Map<SecretKey, HTMLInputElement>();
@@ -331,6 +339,7 @@ export function mountApp(root: string | HTMLElement): void {
           bucketIn,
           akidIn,
           secretField('secretAccessKey', secretIn, 'Secret Access Key'),
+          h('label', {}, [defaultCredsIn, ` ${t('profile.s3UseDefaultCredentials')}`]),
         );
       }
       fields.append(commonFields());
@@ -370,6 +379,7 @@ export function mountApp(root: string | HTMLElement): void {
         bucket: bucketIn.value.trim(),
         accessKeyId: akidIn.value.trim(),
         secretAccessKey: secretIn.value,
+        useDefaultCredentials: defaultCredsIn.checked,
         connectTimeoutMs: timeoutIn.value.trim(),
         autoReconnect: reconnectIn.checked,
         clearSecrets: [...clearChecks].filter(([, chk]) => chk.checked).map(([key]) => key),
@@ -403,10 +413,29 @@ export function mountApp(root: string | HTMLElement): void {
     }
   }
 
+  /**
+   * プロファイル削除。プロファイル本体とシークレット以外は消さないのが既定で、
+   * 関連データ（ブックマーク・履歴・ホスト鍵）とバックアップはそれぞれ明示同意を取る。
+   * バックアップは復旧手段でもあるため、関連データとは別の確認にしている。
+   */
   async function deleteProfile(id: string): Promise<void> {
-    await guard('プロファイル削除', () => api.deleteProfile(id));
+    if (!window.confirm(t('profile.deleteConfirm', { id }))) return;
+    const removeRelatedData = window.confirm(t('profile.deleteRelatedConfirm', { id }));
+    const removeBackups =
+      removeRelatedData && window.confirm(t('profile.deleteBackupsConfirm', { id }));
+
+    const result = await guard('プロファイル削除', () =>
+      api.deleteProfile(id, { removeRelatedData, removeBackups }),
+    );
     if (state.currentProfileId === id) state.currentProfileId = null;
+    if (result) {
+      setStatus(
+        `プロファイル削除: 完了（ブックマーク ${result.removedBookmarks} / 履歴 ${result.removedHistory} / ホスト鍵 ${result.removedKnownHosts} / バックアップ ${result.purgedBackupNamespaces > 0 ? '削除' : '保持'}）`,
+      );
+    }
     await refreshProfiles();
+    await refreshKnownHosts();
+    await refreshHistory();
   }
 
   async function selectProfile(id: string): Promise<void> {
@@ -455,6 +484,61 @@ export function mountApp(root: string | HTMLElement): void {
     );
     if (removed === undefined) return;
     await refreshKnownHosts();
+  }
+
+  // ---- settings -------------------------------------------------------------
+  async function refreshSettings(): Promise<void> {
+    state.settings = (await guard('設定読込', () => api.getSettings())) ?? DEFAULT_SETTINGS;
+    renderSettings();
+  }
+
+  function renderSettings(): void {
+    const numberIn = (value: number): HTMLInputElement =>
+      h('input', {
+        class: 'form_1__input',
+        type: 'number',
+        value: String(value),
+      }) as HTMLInputElement;
+
+    const generationsIn = numberIn(state.settings.backup.maxGenerations);
+    const ageIn = numberIn(state.settings.backup.maxAgeDays ?? 0);
+    const diffIn = numberIn(state.settings.diff.maxBytes);
+
+    settingsPanel.replaceChildren(
+      h('h2', {}, [t('panel.settings')]),
+      h('div', { class: 'form_1__fields' }, [
+        h('label', {}, [`${t('settings.backupMaxGenerations')}: `, generationsIn]),
+        h('label', {}, [`${t('settings.backupMaxAgeDays')}: `, ageIn]),
+        h('label', {}, [`${t('settings.diffMaxBytes')}: `, diffIn]),
+      ]),
+      h('div', { class: 'form_1__actions' }, [
+        h(
+          'button',
+          {
+            class: 'btn_1 btn_1--primary',
+            onclick: () =>
+              void saveSettings({
+                backup: {
+                  maxGenerations: Number(generationsIn.value),
+                  // 0（および空欄）は「無期限」の意味なので null へ倒す。
+                  maxAgeDays: Number(ageIn.value) > 0 ? Number(ageIn.value) : null,
+                },
+                diff: { maxBytes: Number(diffIn.value) },
+              }),
+          },
+          [t('btn.save')],
+        ),
+      ]),
+      h('div', { class: 'queue_1__hint' }, [t('settings.note')]),
+    );
+  }
+
+  async function saveSettings(next: AppSettings): Promise<void> {
+    const saved = await guard('設定保存', () => api.saveSettings(next));
+    if (!saved) return;
+    state.settings = saved;
+    renderSettings();
+    setStatus(t('settings.saved'));
   }
 
   // ---- local browser --------------------------------------------------------
@@ -1271,6 +1355,16 @@ export function mountApp(root: string | HTMLElement): void {
         },
         ['全キャンセル'],
       ),
+      h(
+        'button',
+        {
+          class: 'btn_1',
+          onclick: () => {
+            void api.clearCompletedTasks().then(() => refreshQueue());
+          },
+        },
+        [t('btn.clearCompleted')],
+      ),
       h('div', { class: 'queue_1__hint' }, [
         '未着手タスクは即時キャンセルされます。実行中の同期は次のファイルへ進まずに停止しますが、書き込み中のファイル 1 件は完了します。',
       ]),
@@ -1381,7 +1475,7 @@ export function mountApp(root: string | HTMLElement): void {
     ]),
     secretWarn,
     h('main', { class: 'layout_1' }, [
-      h('section', { class: 'layout_1__col' }, [profilePanel, knownHostsPanel]),
+      h('section', { class: 'layout_1__col' }, [profilePanel, knownHostsPanel, settingsPanel]),
       h('section', { class: 'layout_1__col' }, [localPanel, remotePanel]),
       h('section', { class: 'layout_1__col' }, [
         transferPanel,
@@ -1407,6 +1501,7 @@ export function mountApp(root: string | HTMLElement): void {
     await loadLocal(home);
     await refreshProfiles();
     await refreshKnownHosts();
+    await refreshSettings();
     renderTransfer();
     renderSync();
     await refreshQueue();

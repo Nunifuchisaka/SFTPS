@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { TransferQueue } from './queue';
+import { TransferQueue, DEFAULT_MAX_COMPLETED_TASKS } from './queue';
 import type { RetryOptions } from './retry';
 import type { TaskProgress } from './progress';
+import type { TransferTask } from './task';
 
 const noRetry: RetryOptions = { maxAttempts: 1, baseDelayMs: 1, factor: 2, maxDelayMs: 10 };
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -119,6 +120,79 @@ describe('TransferQueue cancel', () => {
     expect(q.list().every((t) => t.status === 'canceled')).toBe(true);
     await q.run();
     expect(ran).toEqual([]);
+  });
+});
+
+describe('TransferQueue completed-task retention', () => {
+  it('keeps only the newest completed tasks after a run (memory/IPC payload bound)', async () => {
+    const q = new TransferQueue({ runTask: async () => {}, retry: noRetry, maxCompletedTasks: 2 });
+    for (const id of ['a', 'b', 'c', 'd']) q.add({ id, kind: 'upload' });
+    await q.run();
+    expect(q.list().map((t) => t.id)).toEqual(['c', 'd']);
+  });
+
+  it('applies a finite default limit when maxCompletedTasks is unset', async () => {
+    const q = new TransferQueue({ runTask: async () => {}, retry: noRetry, concurrency: 8 });
+    for (let i = 0; i < DEFAULT_MAX_COMPLETED_TASKS + 5; i++) q.add({ id: `t${i}`, kind: 'upload' });
+    await q.run();
+    expect(q.list()).toHaveLength(DEFAULT_MAX_COMPLETED_TASKS);
+    expect(q.list()[0].id).toBe('t5');
+  });
+
+  it('never drops tasks that have not finished yet', async () => {
+    const q = new TransferQueue({ runTask: async () => {}, retry: noRetry, maxCompletedTasks: 1 });
+    q.add({ id: 'a', kind: 'upload' });
+    q.add({ id: 'b', kind: 'upload' });
+    await q.run();
+    q.add({ id: 'c', kind: 'upload' });
+    expect(q.list().map((t) => t.id)).toEqual(['b', 'c']);
+  });
+
+  it('reports evicted tasks so callers can persist them before they are dropped', async () => {
+    const evicted: TransferTask[][] = [];
+    const q = new TransferQueue({
+      runTask: async () => {},
+      retry: noRetry,
+      maxCompletedTasks: 1,
+      onEvict: (tasks) => evicted.push(tasks),
+    });
+    q.add({ id: 'a', kind: 'upload' });
+    q.add({ id: 'b', kind: 'upload' });
+    await q.run();
+    expect(evicted.flat().map((t) => t.id)).toEqual(['a']);
+    expect(evicted.flat()[0].status).toBe('succeeded');
+  });
+
+  it('clearCompleted removes finished tasks, keeps pending ones and returns what it dropped', async () => {
+    const q = new TransferQueue({ runTask: async () => {}, retry: noRetry });
+    q.add({ id: 'a', kind: 'upload' });
+    q.add({ id: 'b', kind: 'upload' });
+    await q.run();
+    q.add({ id: 'c', kind: 'upload' });
+
+    const dropped = q.clearCompleted();
+    expect(dropped.map((t) => t.id)).toEqual(['a', 'b']);
+    expect(q.list().map((t) => t.id)).toEqual(['c']);
+  });
+
+  it('clearCompleted also frees the progress of dropped tasks (overall stops counting them)', async () => {
+    const q = new TransferQueue({
+      runTask: async (_t, ctx) => ctx.reportProgress({ transferred: 100, total: 100 }),
+      retry: noRetry,
+    });
+    q.add({ id: 'a', kind: 'upload' });
+    await q.run();
+    expect(q.overall().total).toBe(100);
+    q.clearCompleted();
+    expect(q.overall()).toEqual({ transferred: 0, total: 0, ratio: 0 });
+  });
+
+  it('clearCompleted drops canceled tasks too', async () => {
+    const q = new TransferQueue({ runTask: async () => {}, retry: noRetry });
+    q.add({ id: 'a', kind: 'upload' });
+    q.cancelAll();
+    expect(q.clearCompleted().map((t) => t.id)).toEqual(['a']);
+    expect(q.list()).toEqual([]);
   });
 });
 

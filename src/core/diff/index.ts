@@ -1,4 +1,5 @@
 import { diffChars as jsDiffChars } from 'diff';
+import { DEFAULT_MAX_DIFF_BYTES, type DiffContentOptions } from './limits';
 
 export type DiffSegmentType = 'equal' | 'added' | 'removed';
 
@@ -13,8 +14,11 @@ export interface DiffSummary {
 }
 
 export type DiffContentResult =
-  | { binary: false; segments: DiffSegment[]; summary: DiffSummary }
-  | { binary: true; beforeSize: number; afterSize: number };
+  | { binary: false; tooLarge: false; segments: DiffSegment[]; summary: DiffSummary }
+  | { binary: true; tooLarge: false; beforeSize: number; afterSize: number }
+  | { binary: false; tooLarge: true; beforeSize: number; afterSize: number; limitBytes: number };
+
+export { DEFAULT_MAX_DIFF_BYTES, type DiffContentOptions } from './limits';
 
 /** 一文字単位の差分を計算する。 */
 export function diffChars(before: string, after: string): DiffSegment[] {
@@ -59,12 +63,27 @@ export function summarize(segments: DiffSegment[]): DiffSummary {
 /**
  * バッファ同士の差分を計算する。
  * どちらかがバイナリならサイズ比較に落とし、文字差分は行わない。
+ * どちらかが上限バイト数を超える場合も文字差分を諦めてサイズ比較に落とす（DoS 対策）。
  * テキストなら BOM を剥がしたうえで一文字単位の差分とサマリを返す。
  */
-export function diffContent(before: Buffer, after: Buffer): DiffContentResult {
+export function diffContent(
+  before: Buffer,
+  after: Buffer,
+  options: DiffContentOptions = {},
+): DiffContentResult {
   if (isBinary(before) || isBinary(after)) {
-    return { binary: true, beforeSize: before.length, afterSize: after.length };
+    return { binary: true, tooLarge: false, beforeSize: before.length, afterSize: after.length };
+  }
+  const limit = options.maxBytes ?? DEFAULT_MAX_DIFF_BYTES;
+  if (limit > 0 && Math.max(before.length, after.length) > limit) {
+    return {
+      binary: false,
+      tooLarge: true,
+      beforeSize: before.length,
+      afterSize: after.length,
+      limitBytes: limit,
+    };
   }
   const segments = diffChars(stripBom(before), stripBom(after));
-  return { binary: false, segments, summary: summarize(segments) };
+  return { binary: false, tooLarge: false, segments, summary: summarize(segments) };
 }

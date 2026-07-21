@@ -85,3 +85,26 @@ describe('diffOrientationLabels', () => {
     });
   });
 });
+
+describe('createDiffView size-limited preview', () => {
+  const tooLargePreview: UploadPreview = {
+    localPath: '/local/dump.sql',
+    remotePath: '/site/dump.sql',
+    isNew: false,
+    binary: false,
+    tooLarge: true,
+    diffLimitBytes: 1024 * 1024,
+    beforeSize: 3_000_000,
+    afterSize: 4_000_000,
+  };
+
+  it('states that the diff was skipped and shows the size comparison instead', () => {
+    const el = createDiffView(tooLargePreview);
+    const notice = el.querySelector('.diff_1__toolarge');
+    expect(notice).not.toBeNull();
+    expect(notice?.textContent).toContain('大きすぎるため差分表示を省略');
+    expect(notice?.textContent).toContain('3000000');
+    expect(notice?.textContent).toContain('4000000');
+    expect(el.querySelectorAll('.diff_1__seg')).toHaveLength(0);
+  });
+});

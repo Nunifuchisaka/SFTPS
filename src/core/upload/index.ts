@@ -9,12 +9,21 @@ export interface CommitOptions {
   verifyAfterTransfer?: boolean;
 }
 
+export interface PreparePreviewOptions {
+  /** 文字差分を行う上限バイト数（超過時はサイズ比較へフォールバック）。 */
+  maxDiffBytes?: number;
+}
+
 export interface UploadPreview {
   localPath: string;
   remotePath: string;
   /** リモートに既存ファイルがない（新規アップロード）か。 */
   isNew: boolean;
   binary: boolean;
+  /** サイズ上限超過のため文字差分を省略したか。 */
+  tooLarge?: boolean;
+  /** 省略の判断に使った上限バイト数（tooLarge のときのみ）。 */
+  diffLimitBytes?: number;
   /** アップロード予定（ローカル）のバイト数。 */
   afterSize: number;
   /** リモート既存ファイルのバイト数。新規なら undefined。 */
@@ -42,6 +51,7 @@ export async function prepareUpload(
   transport: RemoteTransport,
   localPath: string,
   remotePath: string,
+  options: PreparePreviewOptions = {},
 ): Promise<UploadPreview> {
   const localData = await readFile(localPath);
 
@@ -56,7 +66,9 @@ export async function prepareUpload(
   }
 
   const remoteData = await transport.readFile(remotePath);
-  const result = diffContent(remoteData, localData);
+  const result = diffContent(remoteData, localData, {
+    ...(options.maxDiffBytes !== undefined ? { maxBytes: options.maxDiffBytes } : {}),
+  });
 
   if (result.binary) {
     return {
@@ -64,6 +76,19 @@ export async function prepareUpload(
       remotePath,
       isNew: false,
       binary: true,
+      beforeSize: remoteData.length,
+      afterSize: localData.length,
+    };
+  }
+
+  if (result.tooLarge) {
+    return {
+      localPath,
+      remotePath,
+      isNew: false,
+      binary: false,
+      tooLarge: true,
+      diffLimitBytes: result.limitBytes,
       beforeSize: remoteData.length,
       afterSize: localData.length,
     };

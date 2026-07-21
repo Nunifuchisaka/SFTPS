@@ -1,14 +1,27 @@
-import { mkdir, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { RemoteTransport } from '../transport/types';
+import {
+  DEFAULT_BACKUP_RETENTION,
+  planBackupRetention,
+  type BackupRetention,
+} from './retention';
 
 export { confirmRestore, type RestoreConfirm } from './restore-guard';
+export {
+  planBackupRetention,
+  DEFAULT_BACKUP_RETENTION,
+  type BackupRetention,
+  type BackupRetentionPlan,
+} from './retention';
 
 export interface BackupManagerOptions {
   /** バックアップ保存先のルートディレクトリ。 */
   backupRoot: string;
   /** 保持する世代数の上限（デフォルト 20）。 */
   maxGenerations?: number;
+  /** 保持期間（日数）。null / 未指定なら無期限。 */
+  maxAgeDays?: number | null;
   /** タイムスタンプ生成関数。テストで固定するため注入可能。 */
   now?: () => Date;
 }
@@ -21,7 +34,6 @@ export interface BackupInfo {
   size: number;
 }
 
-const DEFAULT_MAX_GENERATIONS = 20;
 const STAMP_RE = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})-(\d{3})$/;
 
 /** Windows で使用できない文字（\ / : * ? " < > |）をアンダースコアに置き換える。 */
@@ -72,13 +84,26 @@ function parseStamp(stem: string): Date | null {
  */
 export class BackupManager {
   private readonly backupRoot: string;
-  private readonly maxGenerations: number;
+  private retention: BackupRetention;
   private readonly now: () => Date;
 
   constructor(options: BackupManagerOptions) {
     this.backupRoot = options.backupRoot;
-    this.maxGenerations = options.maxGenerations ?? DEFAULT_MAX_GENERATIONS;
+    this.retention = {
+      maxGenerations: options.maxGenerations ?? DEFAULT_BACKUP_RETENTION.maxGenerations,
+      maxAgeDays: options.maxAgeDays ?? DEFAULT_BACKUP_RETENTION.maxAgeDays,
+    };
     this.now = options.now ?? (() => new Date());
+  }
+
+  /** 現在の保持ポリシー。 */
+  getRetention(): BackupRetention {
+    return { ...this.retention };
+  }
+
+  /** 保持ポリシーを更新する（設定変更を実行中のアプリへ即反映するため）。 */
+  setRetention(retention: Partial<BackupRetention>): void {
+    this.retention = { ...this.retention, ...retention };
   }
 
   /**
@@ -97,11 +122,12 @@ export class BackupManager {
     const dir = this.dirFor(profileId, remotePath);
     await mkdir(dir, { recursive: true });
 
+    const now = this.now();
     const ext = path.posix.extname(remotePath);
-    const file = path.join(dir, `${formatStamp(this.now())}${ext}`);
+    const file = path.join(dir, `${formatStamp(now)}${ext}`);
     await writeFile(file, data);
 
-    await this.rotate(dir);
+    await this.rotate(dir, now);
     return file;
   }
 
@@ -167,13 +193,47 @@ export class BackupManager {
     return result;
   }
 
-  private async rotate(dir: string): Promise<void> {
-    const generations = (await this.readGenerations(dir)).sort((a, b) =>
-      a.stem < b.stem ? -1 : a.stem > b.stem ? 1 : 0,
-    );
-    const excess = generations.length - this.maxGenerations;
-    for (let i = 0; i < excess; i++) {
-      await unlink(path.join(dir, generations[i].file));
+  /**
+   * プロファイル削除に伴い、その名前空間のバックアップを丸ごと消す。
+   * 名前空間は消毒してから使うため backupRoot の外は決して消さない。
+   */
+  async purgeNamespace(namespace: string): Promise<void> {
+    const dir = path.join(this.backupRoot, sanitizeBackupNamespace(namespace));
+    if (path.relative(this.backupRoot, dir).startsWith('..')) return;
+    await rm(dir, { recursive: true, force: true });
+  }
+
+  /**
+   * 保存済みの全バックアップに保持ポリシーを適用し、削除した件数を返す。
+   * 上書き時のローテーションだけでは、以後触られないファイルの世代が
+   * 保持期間を過ぎても残り続けるため、明示的な掃除口を用意する。
+   */
+  async pruneExpired(): Promise<number> {
+    return this.pruneTree(this.backupRoot, this.now());
+  }
+
+  private async pruneTree(dir: string, now: Date): Promise<number> {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return 0;
     }
+    let removed = 0;
+    for (const entry of entries) {
+      if (entry.isDirectory()) removed += await this.pruneTree(path.join(dir, entry.name), now);
+    }
+    return removed + (await this.rotate(dir, now));
+  }
+
+  /** ディレクトリ内の世代へ保持ポリシーを適用し、削除件数を返す。 */
+  private async rotate(dir: string, now: Date): Promise<number> {
+    const generations = await this.readGenerations(dir);
+    if (generations.length === 0) return 0;
+    const plan = planBackupRetention(generations, this.retention, now);
+    for (const generation of plan.remove) {
+      await unlink(path.join(dir, generation.file));
+    }
+    return plan.remove.length;
   }
 }

@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import type { TransferTask } from '../core/queue/index';
+import type { HistoryInput } from '../core/history/index';
 import type { TransferRequest } from '../shared/ipc';
-import { taskToHistoryInput } from './history-recorder';
+import { taskToHistoryInput, TerminalTaskRecorder } from './history-recorder';
 
 function task(over: Partial<TransferTask> & { payload: TransferRequest }): TransferTask {
   return { id: 't1', kind: 'upload', status: 'succeeded', attempts: 1, ...over };
@@ -58,5 +59,61 @@ describe('taskToHistoryInput', () => {
         task({ status: 'running', payload: { kind: 'upload', profileId: 'p', localPath: '/a', remotePath: '/b' } }),
       ),
     ).toBeNull();
+  });
+});
+
+describe('TerminalTaskRecorder', () => {
+  function upload(id: string, status: TransferTask['status']): TransferTask {
+    return task({
+      id,
+      status,
+      payload: { kind: 'upload', profileId: 'p1', localPath: `/l/${id}`, remotePath: `/r/${id}` },
+    });
+  }
+
+  function setup(): { appended: HistoryInput[]; recorder: TerminalTaskRecorder } {
+    const appended: HistoryInput[] = [];
+    return { appended, recorder: new TerminalTaskRecorder((input) => appended.push(input)) };
+  }
+
+  it('records each terminal task exactly once across repeated calls', () => {
+    const { appended, recorder } = setup();
+    const tasks = [upload('a', 'succeeded'), upload('b', 'failed')];
+    expect(recorder.record(tasks)).toBe(2);
+    expect(recorder.record(tasks)).toBe(0);
+    expect(appended.map((e) => e.id)).toEqual(['a', 'b']);
+  });
+
+  it('skips tasks that have not reached a terminal state yet', () => {
+    const { appended, recorder } = setup();
+    recorder.record([upload('a', 'running'), upload('b', 'retrying'), upload('c', 'queued')]);
+    expect(appended).toEqual([]);
+    expect(recorder.recordedCount).toBe(0);
+  });
+
+  it('records a task that becomes terminal on a later call', () => {
+    const { appended, recorder } = setup();
+    recorder.record([upload('a', 'running')]);
+    recorder.record([upload('a', 'succeeded')]);
+    expect(appended.map((e) => e.id)).toEqual(['a']);
+  });
+
+  it('sweep drops ids that are no longer present so the dedup set stays bounded', () => {
+    const { recorder } = setup();
+    recorder.record([upload('a', 'succeeded'), upload('b', 'succeeded')]);
+    expect(recorder.recordedCount).toBe(2);
+    recorder.sweep(['b']);
+    expect(recorder.recordedCount).toBe(1);
+    recorder.sweep([]);
+    expect(recorder.recordedCount).toBe(0);
+  });
+
+  it('keeps deduplicating the tasks that survive a sweep', () => {
+    const { appended, recorder } = setup();
+    const live = [upload('a', 'succeeded')];
+    recorder.record(live);
+    recorder.sweep(live.map((t) => t.id));
+    recorder.record(live);
+    expect(appended).toHaveLength(1);
   });
 });

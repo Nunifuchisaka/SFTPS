@@ -104,3 +104,35 @@ describe('download (integration, two LocalTransports, no mocks)', () => {
     expect((await backupManager.restore(downloadBackupKey('p1'), '/x.txt')).toString()).toBe('LOCAL_OLD');
   });
 });
+
+describe('prepareDownload diff size limit', () => {
+  let dir: string;
+  let remote: LocalTransport;
+  let local: LocalTransport;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'sftps-dl-lim-'));
+    remote = new LocalTransport(join(dir, 'remote'));
+    local = new LocalTransport(join(dir, 'local'));
+    await remote.connect();
+    await local.connect();
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('falls back to a size comparison when the file is over the limit', async () => {
+    await remote.writeFile('/big.txt', Buffer.from('r'.repeat(50), 'utf8'));
+    await local.writeFile('/big.txt', Buffer.from('l'.repeat(40), 'utf8'));
+
+    const preview = await prepareDownload(remote, local, '/big.txt', '/big.txt', {
+      maxDiffBytes: 30,
+    });
+    expect(preview.tooLarge).toBe(true);
+    expect(preview.diffLimitBytes).toBe(30);
+    expect(preview.beforeSize).toBe(40);
+    expect(preview.afterSize).toBe(50);
+    expect(preview.segments).toBeUndefined();
+  });
+});

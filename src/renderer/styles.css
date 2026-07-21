@@ -249,6 +249,7 @@ textarea.form_1__input {
 }
 
 .diff_1__binary,
+.diff_1__toolarge,
 .diff_1__new {
   padding: 8px;
   border: 1px dashed var(--line);

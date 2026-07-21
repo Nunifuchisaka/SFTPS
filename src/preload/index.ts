@@ -4,7 +4,7 @@ import { IPC, type SftpsApi } from '../shared/ipc';
 const api: SftpsApi = {
   listProfiles: () => ipcRenderer.invoke(IPC.listProfiles),
   saveProfile: (input, options) => ipcRenderer.invoke(IPC.saveProfile, input, options),
-  deleteProfile: (id) => ipcRenderer.invoke(IPC.deleteProfile, id),
+  deleteProfile: (id, options) => ipcRenderer.invoke(IPC.deleteProfile, id, options),
   testConnection: (id) => ipcRenderer.invoke(IPC.testConnection, id),
   listRemote: (id, remoteDir) => ipcRenderer.invoke(IPC.listRemote, id, remoteDir),
   prepareUpload: (id, localPath, remotePath) =>
@@ -18,6 +18,7 @@ const api: SftpsApi = {
   enqueueTransfer: (request) => ipcRenderer.invoke(IPC.enqueueTransfer, request),
   queueStatus: () => ipcRenderer.invoke(IPC.queueStatus),
   cancelAllTasks: () => ipcRenderer.invoke(IPC.cancelAllTasks),
+  clearCompletedTasks: () => ipcRenderer.invoke(IPC.clearCompletedTasks),
   prepareDownload: (id, remotePath, savePath) =>
     ipcRenderer.invoke(IPC.prepareDownload, id, remotePath, savePath),
   download: (id, remotePath, savePath) =>
@@ -36,6 +37,8 @@ const api: SftpsApi = {
     ipcRenderer.invoke(IPC.restoreBackup, id, remotePath, timestamp),
   listKnownHosts: () => ipcRenderer.invoke(IPC.listKnownHosts),
   removeKnownHost: (host, port) => ipcRenderer.invoke(IPC.removeKnownHost, host, port),
+  getSettings: () => ipcRenderer.invoke(IPC.getSettings),
+  saveSettings: (settings) => ipcRenderer.invoke(IPC.saveSettings, settings),
   isSecretStorageAvailable: () => ipcRenderer.invoke(IPC.isSecretStorageAvailable),
   listLocal: (dir) => ipcRenderer.invoke(IPC.listLocal, dir),
   homeDir: () => ipcRenderer.invoke(IPC.homeDir),

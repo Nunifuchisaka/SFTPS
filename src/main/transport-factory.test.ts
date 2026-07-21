@@ -55,14 +55,14 @@ describe('config builders', () => {
     expect(buildFtpAccessOptions({ ...ftpProfile, connectTimeoutMs: 12000 }, {}).timeout).toBe(12000);
     const sftpCfg = buildSftpConnectConfig({ ...sftpProfile, connectTimeoutMs: 12000 }, {}) as Record<string, unknown>;
     expect(sftpCfg.readyTimeout).toBe(12000);
-    const s3Cfg = buildS3ClientConfig({ ...s3Profile, connectTimeoutMs: 12000 }, {});
+    const s3Cfg = buildS3ClientConfig({ ...s3Profile, connectTimeoutMs: 12000 }, { secretAccessKey: 'sk' });
     expect(s3Cfg.requestHandler).toEqual({ connectionTimeout: 12000, requestTimeout: 12000 });
   });
 
   it('omits timeout options when connectTimeoutMs is unset', () => {
     expect('timeout' in buildFtpAccessOptions(ftpProfile, {})).toBe(false);
     expect('readyTimeout' in buildSftpConnectConfig(sftpProfile, {})).toBe(false);
-    expect(buildS3ClientConfig(s3Profile, {}).requestHandler).toBeUndefined();
+    expect(buildS3ClientConfig(s3Profile, { secretAccessKey: 'sk' }).requestHandler).toBeUndefined();
   });
 
   it('buildSftpConnectConfig includes hostVerifier when provided, and omits it otherwise', () => {
@@ -83,9 +83,24 @@ describe('config builders', () => {
     });
   });
 
-  it('buildS3ClientConfig omits credentials when the secret is missing', () => {
-    const cfg = buildS3ClientConfig(s3Profile, {});
+  // 仕様変更（監査 M-10）: 資格情報が欠けたときの暗黙的な既定チェーンへのフォールバックは
+  // 意図しないマシン資格情報での本番書き込みを招くため、明示オプトイン制にした。
+  it('buildS3ClientConfig refuses to fall back to the machine credential chain by default', () => {
+    expect(() => buildS3ClientConfig(s3Profile, {})).toThrow(/credential/i);
+  });
+
+  it('buildS3ClientConfig omits credentials only when the default chain is opted in', () => {
+    const cfg = buildS3ClientConfig({ ...s3Profile, useDefaultCredentials: true }, {});
     expect(cfg).toEqual({ region: 'ap-northeast-1' });
+  });
+
+  it('buildS3ClientConfig keeps the timeout even when using the default chain', () => {
+    const cfg = buildS3ClientConfig(
+      { ...s3Profile, useDefaultCredentials: true, connectTimeoutMs: 5000 },
+      {},
+    );
+    expect(cfg.credentials).toBeUndefined();
+    expect(cfg.requestHandler).toEqual({ connectionTimeout: 5000, requestTimeout: 5000 });
   });
 });
 

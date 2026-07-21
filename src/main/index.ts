@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, safeStorage } from 'electron';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { BackupManager } from '../core/backup/index';
@@ -19,8 +20,13 @@ import { KnownHostsController } from './known-hosts-controller';
 import { createAppTransferQueue } from './transfer-queue-factory';
 import { HistoryFile } from './history-store';
 import { BookmarkFile } from './bookmark-store';
+import { SettingsFile } from './settings-store';
+import { SettingsController } from './settings-controller';
+import { TerminalTaskRecorder } from './history-recorder';
+import { listLocalDir } from './local-fs';
 import { registerIpc, type HistoryController } from './ipc/register';
-import type { HistoryFilter, HistoryInput } from '../core/history/index';
+import type { HistoryStore, HistoryFilter, HistoryInput } from '../core/history/index';
+import type { AppSettings } from '../core/settings/index';
 
 type Translate = (key: string, params?: Record<string, string | number>) => string;
 
@@ -54,7 +60,17 @@ async function openKnownHosts(t: Translate): Promise<KnownHostsController> {
   }
 }
 
-function createService(t: Translate, knownHosts: KnownHostsController): AppService {
+interface ServiceParts {
+  backupManager: BackupManager;
+  history: MainHistoryController;
+  settings: () => AppSettings;
+}
+
+function createService(
+  t: Translate,
+  knownHosts: KnownHostsController,
+  parts: ServiceParts,
+): AppService {
   const userData = app.getPath('userData');
 
   const deps: TransportFactoryDeps = {
@@ -83,9 +99,12 @@ function createService(t: Translate, knownHosts: KnownHostsController): AppServi
   return new AppService({
     profileStore: new ProfileStore(join(userData, 'profiles.json')),
     secretStore: new SecretStore({ safeStorage, filePath: join(userData, 'secrets.json') }),
-    backupManager: new BackupManager({ backupRoot: join(userData, 'backups') }),
+    backupManager: parts.backupManager,
     bookmarkStore: new BookmarkFile(join(userData, 'bookmarks.json')),
     createTransport: (profile, secrets) => createTransport(profile, secrets, deps),
+    historyStore: parts.history,
+    knownHosts,
+    settings: parts.settings,
   });
 }
 
@@ -121,9 +140,14 @@ function warnHostKeyMismatch(t: Translate, request: PromptRequest): void {
   dialog.showErrorBox(content.message, content.detail);
 }
 
-async function createHistoryController(t: Translate): Promise<HistoryController> {
+/** IPC 用の履歴口に、プロファイル削除時の掃除（removeByProfile）を足したもの。 */
+interface MainHistoryController extends HistoryController {
+  removeByProfile(profileId: string): number;
+}
+
+async function createHistoryController(t: Translate): Promise<MainHistoryController> {
   const historyFile = new HistoryFile(join(app.getPath('userData'), 'history.json'));
-  const history = await historyFile.load();
+  const history: HistoryStore = await historyFile.load();
   const save = (): void => {
     historyFile.save(history).catch((err: unknown) => reportStoreError(t, 'history.json', err));
   };
@@ -136,6 +160,11 @@ async function createHistoryController(t: Translate): Promise<HistoryController>
     clear: () => {
       history.clear();
       save();
+    },
+    removeByProfile: (profileId: string) => {
+      const removed = history.removeByProfile(profileId);
+      if (removed > 0) save();
+      return removed;
     },
   };
 }
@@ -185,6 +214,65 @@ function createWindow(): void {
   }
 }
 
+/** 永続層・サービス・キュー・IPC を組み立てて画面を開く。 */
+async function boot(): Promise<void> {
+  const t = createMainTranslator();
+  const userData = app.getPath('userData');
+  const knownHosts = await openKnownHosts(t);
+  const history = await createHistoryController(t);
+
+  const settingsFile = new SettingsFile(join(userData, 'settings.json'));
+  const initial = await settingsFile.load();
+  const backupManager = new BackupManager({
+    backupRoot: join(userData, 'backups'),
+    maxGenerations: initial.backup.maxGenerations,
+    maxAgeDays: initial.backup.maxAgeDays,
+  });
+  const settings = new SettingsController(settingsFile, initial, (next) => {
+    backupManager.setRetention(next.backup);
+    // 保持期間を縮めた設定は、既存の（もう触られない）バックアップにも効かせる。
+    backupManager.pruneExpired().catch((err: unknown) => reportStoreError(t, 'backups', err));
+  });
+  settings.applyNow();
+
+  const service = createService(t, knownHosts, {
+    backupManager,
+    history,
+    settings: () => settings.get(),
+  });
+  // 終端タスクの履歴記録はキューの保持上限より先に走らせる（破棄前に記録する）。
+  const recorder = new TerminalTaskRecorder((input) => history.append(input));
+  const queue = createAppTransferQueue(service, {
+    onEvict: (tasks) => void recorder.record(tasks),
+  });
+
+  registerIpc({
+    service,
+    queue,
+    recorder,
+    history,
+    knownHosts,
+    settings,
+    listLocal: (dir) => listLocalDir(dir),
+    homeDir: () => homedir(),
+    isSecretStorageAvailable: () => safeStorage.isEncryptionAvailable(),
+    pickFile: async () => {
+      const result = await dialog.showOpenDialog({ properties: ['openFile'] });
+      return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0];
+    },
+    pickDirectory: async () => {
+      const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });
+      return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0];
+    },
+    pickSavePath: async (defaultName: string) => {
+      const result = await dialog.showSaveDialog({ defaultPath: defaultName });
+      return result.canceled || !result.filePath ? null : result.filePath;
+    },
+  });
+
+  createWindow();
+}
+
 // 二重起動は後勝ちで永続ファイルを壊すため、常に単一インスタンスに閉じる。
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -202,12 +290,7 @@ if (!app.requestSingleInstanceLock()) {
   hardenWebContents();
 
   void app.whenReady().then(async () => {
-    const t = createMainTranslator();
-    const knownHosts = await openKnownHosts(t);
-    const service = createService(t, knownHosts);
-    const history = await createHistoryController(t);
-    registerIpc(service, createAppTransferQueue(service), history, knownHosts);
-    createWindow();
+    await boot();
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();

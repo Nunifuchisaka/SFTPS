@@ -2,6 +2,9 @@ import type { RemoteTransport } from '../transport/index';
 import type { BackupManager } from '../backup/index';
 import { diffContent, isBinary, type DiffSegment, type DiffSummary } from '../diff/index';
 import { verifyBuffers } from '../checksum/index';
+import type { PreparePreviewOptions } from '../upload/index';
+
+export type { PreparePreviewOptions };
 
 export interface DownloadCommitOptions {
   /** true のとき、書き込み後にローカルを読み直してハッシュ比較する（不一致なら例外）。 */
@@ -14,6 +17,10 @@ export interface DownloadPreview {
   /** ローカルに既存ファイルがない（新規ダウンロード）か。 */
   isNew: boolean;
   binary: boolean;
+  /** サイズ上限超過のため文字差分を省略したか。 */
+  tooLarge?: boolean;
+  /** 省略の判断に使った上限バイト数（tooLarge のときのみ）。 */
+  diffLimitBytes?: number;
   /** ダウンロード予定（リモート）のバイト数。 */
   afterSize: number;
   /** 既存ローカルファイルのバイト数。新規なら undefined。 */
@@ -49,6 +56,7 @@ export async function prepareDownload(
   local: RemoteTransport,
   remotePath: string,
   localPath: string,
+  options: PreparePreviewOptions = {},
 ): Promise<DownloadPreview> {
   const remoteData = await remote.readFile(remotePath);
 
@@ -63,7 +71,10 @@ export async function prepareDownload(
   }
 
   const localData = await local.readFile(localPath);
-  const result = diffContent(localData, remoteData); // before=local, after=remote
+  // before=local, after=remote
+  const result = diffContent(localData, remoteData, {
+    ...(options.maxDiffBytes !== undefined ? { maxBytes: options.maxDiffBytes } : {}),
+  });
 
   if (result.binary) {
     return {
@@ -71,6 +82,19 @@ export async function prepareDownload(
       remotePath,
       isNew: false,
       binary: true,
+      beforeSize: localData.length,
+      afterSize: remoteData.length,
+    };
+  }
+
+  if (result.tooLarge) {
+    return {
+      localPath,
+      remotePath,
+      isNew: false,
+      binary: false,
+      tooLarge: true,
+      diffLimitBytes: result.limitBytes,
       beforeSize: localData.length,
       afterSize: remoteData.length,
     };
