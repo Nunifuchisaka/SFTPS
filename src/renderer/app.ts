@@ -14,7 +14,9 @@ import {
 } from '../core/browse/index';
 import { confirmDeletion, parseMode, isActionAvailable } from '../core/remoteops/index';
 import type { HistoryFilter, HistoryKind, HistoryStatus } from '../core/history/index';
+import type { Bookmark } from '../core/bookmark/index';
 import { createHistoryView } from './history-view';
+import { createBookmarkView } from './bookmark-view';
 import { createTranslator, dictionaries, resolveLocale, LOCALES } from '../core/i18n/index';
 import { normalizeThemeSetting, THEME_SETTINGS, type ThemeSetting } from '../core/theme/index';
 import { applyTheme } from './theme';
@@ -81,6 +83,8 @@ interface State {
   chmodPath: string | null;
   historyFilter: HistoryFilter;
   verifyAfterTransfer: boolean;
+  bookmarks: Bookmark[];
+  bookmarkName: string;
 }
 
 export function mountApp(root: string | HTMLElement): void {
@@ -108,7 +112,11 @@ export function mountApp(root: string | HTMLElement): void {
     chmodPath: null,
     historyFilter: {},
     verifyAfterTransfer: false,
+    bookmarks: [],
+    bookmarkName: '',
   };
+
+  let bookmarkSeq = 0;
 
   const locale = resolveLocale(
     window.localStorage.getItem('sftps.locale') ?? window.navigator.language,
@@ -352,6 +360,7 @@ export function mountApp(root: string | HTMLElement): void {
       setStatus(`接続失敗: ${conn.error ?? ''}`, true);
     }
     state.remoteDir = '/';
+    await refreshBookmarks();
     await loadRemote('/');
   }
 
@@ -613,7 +622,68 @@ export function mountApp(root: string | HTMLElement): void {
       h('button', { class: 'btn_1', onclick: () => void enqueueSelectedDownloads() }, [
         '選択をキューにダウンロード',
       ]),
+      renderBookmarks(),
     );
+  }
+
+  // ---- bookmarks ------------------------------------------------------------
+  async function refreshBookmarks(): Promise<void> {
+    if (!state.currentProfileId) {
+      state.bookmarks = [];
+      return;
+    }
+    state.bookmarks = (await api.listBookmarks(state.currentProfileId)) ?? [];
+  }
+
+  function renderBookmarks(): HTMLElement {
+    const nameIn = h('input', {
+      class: 'form_1__input',
+      type: 'text',
+      value: state.bookmarkName,
+      placeholder: t('bookmark.namePrompt'),
+    }) as HTMLInputElement;
+    nameIn.addEventListener('input', () => {
+      state.bookmarkName = nameIn.value;
+    });
+
+    return h('div', { class: 'bookmark_wrap_1' }, [
+      h('h3', {}, [t('panel.bookmarks')]),
+      h('div', { class: 'browser_1__tools' }, [
+        nameIn,
+        h('button', { class: 'btn_1', onclick: () => void addBookmark() }, [t('btn.addBookmark')]),
+      ]),
+      createBookmarkView(state.bookmarks, {
+        onOpen: (b) => void loadRemote(b.remotePath),
+        onRemove: (b) => void removeBookmark(b.id),
+      }),
+    ]);
+  }
+
+  async function addBookmark(): Promise<void> {
+    if (!state.currentProfileId) {
+      setStatus('先にプロファイルへ接続してください', true);
+      return;
+    }
+    const name = state.bookmarkName.trim() || basename(state.remoteDir) || state.remoteDir;
+    const ok = await guard('ブックマーク追加', () =>
+      api.addBookmark({
+        id: `bm${Date.now()}-${bookmarkSeq++}`,
+        profileId: state.currentProfileId as string,
+        name,
+        remotePath: state.remoteDir,
+      }),
+    );
+    if (!ok) return;
+    state.bookmarkName = '';
+    await refreshBookmarks();
+    renderRemote();
+  }
+
+  async function removeBookmark(id: string): Promise<void> {
+    const ok = await guardOk('ブックマーク削除', () => api.removeBookmark(id));
+    if (!ok) return;
+    await refreshBookmarks();
+    renderRemote();
   }
 
   function startRename(path: string): void {

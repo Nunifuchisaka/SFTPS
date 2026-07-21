@@ -6,6 +6,7 @@ import type { BackupInfo } from '../core/backup/index';
 import type { CompareBy, PlanSummary, RunSyncResult, SyncAction } from '../core/sync/index';
 import type { OverallProgress, TransferTask } from '../core/queue/index';
 import type { HistoryEntry, HistoryFilter } from '../core/history/index';
+import type { Bookmark, BookmarkInput } from '../core/bookmark/index';
 
 export interface ConnectionResult {
   ok: boolean;
@@ -67,6 +68,10 @@ export const IPC = {
   chmodRemote: 'remote:chmod',
   historyList: 'history:list',
   historyClear: 'history:clear',
+  listBookmarks: 'bookmark:list',
+  addBookmark: 'bookmark:add',
+  removeBookmark: 'bookmark:remove',
+  renameBookmark: 'bookmark:rename',
   listBackups: 'backup:list',
   restoreBackup: 'backup:restore',
   isSecretStorageAvailable: 'secret:available',
@@ -116,6 +121,10 @@ export interface SftpsApi {
   chmodRemote(id: string, remotePath: string, mode: number): Promise<void>;
   historyList(filter?: HistoryFilter): Promise<HistoryEntry[]>;
   historyClear(): Promise<void>;
+  listBookmarks(profileId?: string): Promise<Bookmark[]>;
+  addBookmark(input: BookmarkInput): Promise<Bookmark>;
+  removeBookmark(id: string): Promise<void>;
+  renameBookmark(id: string, name: string): Promise<Bookmark>;
   listBackups(id: string, remotePath: string): Promise<BackupInfo[]>;
   restoreBackup(id: string, remotePath: string, timestamp?: Date): Promise<{ bytesWritten: number }>;
   isSecretStorageAvailable(): Promise<boolean>;

@@ -27,6 +27,10 @@ const api: SftpsApi = {
   chmodRemote: (id, remotePath, mode) => ipcRenderer.invoke(IPC.chmodRemote, id, remotePath, mode),
   historyList: (filter) => ipcRenderer.invoke(IPC.historyList, filter),
   historyClear: () => ipcRenderer.invoke(IPC.historyClear),
+  listBookmarks: (profileId) => ipcRenderer.invoke(IPC.listBookmarks, profileId),
+  addBookmark: (input) => ipcRenderer.invoke(IPC.addBookmark, input),
+  removeBookmark: (id) => ipcRenderer.invoke(IPC.removeBookmark, id),
+  renameBookmark: (id, name) => ipcRenderer.invoke(IPC.renameBookmark, id, name),
   listBackups: (id, remotePath) => ipcRenderer.invoke(IPC.listBackups, id, remotePath),
   restoreBackup: (id, remotePath, timestamp) =>
     ipcRenderer.invoke(IPC.restoreBackup, id, remotePath, timestamp),

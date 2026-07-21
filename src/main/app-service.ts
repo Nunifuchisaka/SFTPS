@@ -21,6 +21,7 @@ import {
   type DownloadPreview,
   type DownloadResult,
 } from '../core/download/index';
+import type { Bookmark, BookmarkInput, BookmarkStore } from '../core/bookmark/index';
 import type { SecretStore } from './secret-store';
 import type { ProfileStore } from './profile-store';
 import type { Secrets } from './transport-factory';
@@ -31,10 +32,17 @@ import type {
   CommitSyncResult,
 } from '../shared/ipc';
 
+/** ブックマークの読み書き口（実体は JSON ファイル永続化）。 */
+export interface BookmarkGateway {
+  load(): Promise<BookmarkStore>;
+  save(store: BookmarkStore): Promise<void>;
+}
+
 export interface AppServiceDeps {
   profileStore: ProfileStore;
   secretStore: SecretStore;
   backupManager: BackupManager;
+  bookmarkStore: BookmarkGateway;
   createTransport: (profile: Profile, secrets: Secrets) => RemoteTransport;
 }
 
@@ -235,6 +243,33 @@ export class AppService {
       await transport.writeFile(remotePath, data);
       return { bytesWritten: data.length };
     });
+  }
+
+  /** ブックマーク一覧（追加順。profileId 指定時はそのプロファイル分のみ）。 */
+  async listBookmarks(profileId?: string): Promise<Bookmark[]> {
+    const store = await this.deps.bookmarkStore.load();
+    return store.list(profileId);
+  }
+
+  /** ブックマークを追加する（同一プロファイル・同一パスの重複は追加せず既存を返す）。 */
+  async addBookmark(input: BookmarkInput): Promise<Bookmark> {
+    const store = await this.deps.bookmarkStore.load();
+    const added = store.add(input); // 不正入力はここで例外 → 保存しない
+    await this.deps.bookmarkStore.save(store);
+    return added;
+  }
+
+  async removeBookmark(id: string): Promise<void> {
+    const store = await this.deps.bookmarkStore.load();
+    store.remove(id);
+    await this.deps.bookmarkStore.save(store);
+  }
+
+  async renameBookmark(id: string, name: string): Promise<Bookmark> {
+    const store = await this.deps.bookmarkStore.load();
+    const renamed = store.rename(id, name);
+    await this.deps.bookmarkStore.save(store);
+    return renamed;
   }
 
   private async resolveConnection(

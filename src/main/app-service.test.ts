@@ -8,6 +8,7 @@ import { BackupManager } from '../core/backup/index';
 import type { FtpProfile } from '../core/profile/index';
 import { SecretStore, type SafeStorageLike } from './secret-store';
 import { ProfileStore } from './profile-store';
+import { BookmarkFile } from './bookmark-store';
 import { AppService } from './app-service';
 
 class FakeSafeStorage implements SafeStorageLike {
@@ -42,6 +43,7 @@ describe('AppService', () => {
   let dir: string;
   let profileFile: string;
   let secretFile: string;
+  let bookmarkFile: string;
   let backupRoot: string;
   let remoteRoot: string;
   let localDir: string;
@@ -53,6 +55,7 @@ describe('AppService', () => {
     dir = await mkdtemp(join(tmpdir(), 'sftps-svc-'));
     profileFile = join(dir, 'profiles.json');
     secretFile = join(dir, 'secrets.json');
+    bookmarkFile = join(dir, 'bookmarks.json');
     backupRoot = join(dir, 'backups');
     remoteRoot = join(dir, 'remote');
     localDir = join(dir, 'local');
@@ -63,6 +66,7 @@ describe('AppService', () => {
     service = new AppService({
       profileStore: new ProfileStore(profileFile),
       secretStore: new SecretStore({ safeStorage: safe, filePath: secretFile }),
+      bookmarkStore: new BookmarkFile(bookmarkFile),
       backupManager: new BackupManager({
         backupRoot,
         now: () => new Date(Date.UTC(2026, 0, 1, 0, 0, clock++)),
@@ -245,5 +249,44 @@ describe('AppService', () => {
     expect(result.backupPath).not.toBeNull();
     expect((await readFile(result.backupPath as string, 'utf8'))).toBe('LOCALOLD');
     expect((await readFile(savePath, 'utf8'))).toBe('REMOTE');
+  });
+
+  it('addBookmark persists a normalized bookmark and listBookmarks reads it back', async () => {
+    const added = await service.addBookmark({
+      id: 'b1',
+      profileId: 'p1',
+      name: '  公開  ',
+      remotePath: '/var/www//pub/',
+    });
+    expect(added).toEqual({ id: 'b1', profileId: 'p1', name: '公開', remotePath: '/var/www/pub' });
+    expect(await service.listBookmarks()).toEqual([added]);
+    expect(await readFile(bookmarkFile, 'utf8')).toContain('/var/www/pub');
+  });
+
+  it('addBookmark ignores a duplicate path for the same profile', async () => {
+    await service.addBookmark({ id: 'b1', profileId: 'p1', name: 'A', remotePath: '/pub' });
+    await service.addBookmark({ id: 'b2', profileId: 'p1', name: 'B', remotePath: '//pub/' });
+    await service.addBookmark({ id: 'b3', profileId: 'p2', name: 'C', remotePath: '/pub' });
+    expect((await service.listBookmarks()).map((b) => b.id)).toEqual(['b1', 'b3']);
+    expect((await service.listBookmarks('p1')).map((b) => b.id)).toEqual(['b1']);
+  });
+
+  it('renameBookmark and removeBookmark update the persisted file', async () => {
+    await service.addBookmark({ id: 'b1', profileId: 'p1', name: 'A', remotePath: '/a' });
+    await service.addBookmark({ id: 'b2', profileId: 'p1', name: 'B', remotePath: '/b' });
+
+    const renamed = await service.renameBookmark('b1', 'AAA');
+    expect(renamed.name).toBe('AAA');
+    expect((await service.listBookmarks()).map((b) => b.name)).toEqual(['AAA', 'B']);
+
+    await service.removeBookmark('b1');
+    expect((await service.listBookmarks()).map((b) => b.id)).toEqual(['b2']);
+  });
+
+  it('addBookmark rejects an empty name without persisting anything', async () => {
+    await expect(
+      service.addBookmark({ id: 'b1', profileId: 'p1', name: '   ', remotePath: '/a' }),
+    ).rejects.toThrow();
+    expect(await service.listBookmarks()).toEqual([]);
   });
 });

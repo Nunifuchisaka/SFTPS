@@ -4,6 +4,7 @@ import { IPC, type SyncFolderOptions, type TransferRequest } from '../../shared/
 import type { Profile } from '../../core/profile/index';
 import type { TransferQueue } from '../../core/queue/index';
 import type { HistoryEntry, HistoryFilter, HistoryInput } from '../../core/history/index';
+import type { BookmarkInput } from '../../core/bookmark/index';
 import type { AppService } from '../app-service';
 import { listLocalDir } from '../local-fs';
 import { taskToHistoryInput } from '../history-recorder';
@@ -137,6 +138,12 @@ export function registerIpc(
       throw err;
     }
   });
+  ipcMain.handle(IPC.listBookmarks, (_e, profileId?: string) => service.listBookmarks(profileId));
+  ipcMain.handle(IPC.addBookmark, (_e, input: BookmarkInput) => service.addBookmark(input));
+  ipcMain.handle(IPC.removeBookmark, (_e, id: string) => service.removeBookmark(id));
+  ipcMain.handle(IPC.renameBookmark, (_e, id: string, name: string) =>
+    service.renameBookmark(id, name),
+  );
   ipcMain.handle(IPC.listBackups, (_e, id: string, remote: string) =>
     service.listBackups(id, remote),
   );

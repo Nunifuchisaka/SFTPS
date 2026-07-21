@@ -9,6 +9,7 @@ import { createTransport, defaultTransportDeps, type TransportFactoryDeps } from
 import { KnownHostsFile } from './known-hosts-store';
 import { createAppTransferQueue } from './transfer-queue-factory';
 import { HistoryFile } from './history-store';
+import { BookmarkFile } from './bookmark-store';
 import { registerIpc, type HistoryController } from './ipc/register';
 import type { HistoryFilter, HistoryInput } from '../core/history/index';
 
@@ -39,6 +40,7 @@ async function createService(): Promise<AppService> {
     profileStore: new ProfileStore(join(userData, 'profiles.json')),
     secretStore: new SecretStore({ safeStorage, filePath: join(userData, 'secrets.json') }),
     backupManager: new BackupManager({ backupRoot: join(userData, 'backups') }),
+    bookmarkStore: new BookmarkFile(join(userData, 'bookmarks.json')),
     createTransport: (profile, secrets) => createTransport(profile, secrets, deps),
   });
 }

@@ -10,6 +10,7 @@ export * from './queue/index';
 export * from './browse/index';
 export * from './remoteops/index';
 export * from './history/index';
+export * from './bookmark/index';
 export * from './checksum/index';
 export * from './i18n/index';
 export * from './theme/index';
