@@ -41,6 +41,16 @@ class FakeSftpClient implements SftpClientLike {
     this.mkdirCalls.push({ path: remotePath, recursive });
     return {};
   }
+  renamed: Array<{ from: string; to: string }> = [];
+  async rename(from: string, to: string): Promise<unknown> {
+    this.renamed.push({ from, to });
+    return {};
+  }
+  chmodCalls: Array<{ path: string; mode: number }> = [];
+  async chmod(remotePath: string, mode: number): Promise<unknown> {
+    this.chmodCalls.push({ path: remotePath, mode });
+    return {};
+  }
 }
 
 describe('SftpTransport', () => {
@@ -101,5 +111,14 @@ describe('SftpTransport', () => {
     await t.mkdir('/a/b/c');
     expect(fake.deleted).toEqual(['/x']);
     expect(fake.mkdirCalls).toEqual([{ path: '/a/b/c', recursive: true }]);
+  });
+
+  it('rename and chmod call the client methods', async () => {
+    const fake = new FakeSftpClient();
+    const t = new SftpTransport(fake);
+    await t.rename('/a.txt', '/b.txt');
+    await t.chmod('/b.txt', 0o644);
+    expect(fake.renamed).toEqual([{ from: '/a.txt', to: '/b.txt' }]);
+    expect(fake.chmodCalls).toEqual([{ path: '/b.txt', mode: 0o644 }]);
   });
 });

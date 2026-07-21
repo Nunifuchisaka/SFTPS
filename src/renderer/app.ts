@@ -12,6 +12,7 @@ import {
   type SortDir,
   type DroppedItem,
 } from '../core/browse/index';
+import { confirmDeletion, parseMode, isActionAvailable } from '../core/remoteops/index';
 import type { QueueStatus, SyncFolderOptions } from '../shared/ipc';
 import { createDiffView, diffOrientationLabels } from './diff-view';
 import { createSyncPlanView } from './sync-view';
@@ -71,6 +72,8 @@ interface State {
   remoteSort: { key: SortKey; dir: SortDir };
   localSelection: Set<string>;
   remoteSelection: Set<string>;
+  renamingPath: string | null;
+  chmodPath: string | null;
 }
 
 export function mountApp(root: string | HTMLElement): void {
@@ -94,7 +97,18 @@ export function mountApp(root: string | HTMLElement): void {
     remoteSort: { key: 'name', dir: 'asc' },
     localSelection: new Set(),
     remoteSelection: new Set(),
+    renamingPath: null,
+    chmodPath: null,
   };
+
+  function currentProtocol(): Protocol | null {
+    const p = state.profiles.find((x) => x.id === state.currentProfileId);
+    return p ? p.protocol : null;
+  }
+
+  function joinRemote(dir: string, name: string): string {
+    return dir === '/' ? `/${name}` : `${dir}/${name}`;
+  }
 
   const statusBar = h('div', { class: 'status_1' });
   const secretWarn = h('div', { class: 'warn_1', hidden: true });
@@ -122,6 +136,19 @@ export function mountApp(root: string | HTMLElement): void {
     } catch (err) {
       setStatus(`${label}: 失敗 - ${err instanceof Error ? err.message : String(err)}`, true);
       return undefined;
+    }
+  }
+
+  /** void 操作用: 成功したら true。 */
+  async function guardOk(label: string, fn: () => Promise<void>): Promise<boolean> {
+    try {
+      setStatus(`${label}...`);
+      await fn();
+      setStatus(`${label}: 完了`);
+      return true;
+    } catch (err) {
+      setStatus(`${label}: 失敗 - ${err instanceof Error ? err.message : String(err)}`, true);
+      return false;
     }
   }
 
@@ -485,9 +512,33 @@ export function mountApp(root: string | HTMLElement): void {
       ]),
     );
 
+    const protocol = currentProtocol();
     const list = h('ul', { class: 'list_1' });
     for (const e of viewEntries(state.remoteEntries, state.remoteFilter, state.remoteSort)) {
       const children: Array<Node | string> = [];
+
+      if (e.path === state.renamingPath) {
+        const inp = h('input', { class: 'form_1__input', type: 'text', value: e.name }) as HTMLInputElement;
+        children.push(
+          inp,
+          h('button', { class: 'btn_1 btn_1--primary', onclick: () => void doRename(e.path, inp.value) }, ['OK']),
+          h('button', { class: 'btn_1', onclick: () => cancelInline() }, ['取消']),
+        );
+        list.append(h('li', { class: 'list_1__item' }, children));
+        continue;
+      }
+      if (e.path === state.chmodPath) {
+        const inp = h('input', { class: 'form_1__input', type: 'text', placeholder: '644' }) as HTMLInputElement;
+        children.push(
+          h('span', { class: 'list_1__label' }, [`${e.name} 権限: `]),
+          inp,
+          h('button', { class: 'btn_1 btn_1--primary', onclick: () => void doChmod(e.path, inp.value) }, ['OK']),
+          h('button', { class: 'btn_1', onclick: () => cancelInline() }, ['取消']),
+        );
+        list.append(h('li', { class: 'list_1__item' }, children));
+        continue;
+      }
+
       if (e.type === 'file') {
         const cb = h('input', { type: 'checkbox' }) as HTMLInputElement;
         cb.checked = state.remoteSelection.has(e.path);
@@ -517,6 +568,14 @@ export function mountApp(root: string | HTMLElement): void {
       if (e.type === 'file') {
         children.push(h('button', { class: 'btn_1', onclick: () => void downloadFile(e.path) }, ['DL']));
       }
+      if (protocol && isActionAvailable(protocol, 'rename')) {
+        children.push(h('button', { class: 'btn_1', onclick: () => startRename(e.path) }, ['改名']));
+      }
+      if (e.type === 'file' && protocol && isActionAvailable(protocol, 'chmod')) {
+        children.push(h('button', { class: 'btn_1', onclick: () => startChmod(e.path) }, ['権限']));
+      }
+      children.push(h('button', { class: 'btn_1', onclick: () => void doDelete(e) }, ['削除']));
+
       const selected = e.type === 'file' && e.path === state.selectedRemote;
       list.append(h('li', { class: `list_1__item${selected ? ' is_active' : ''}` }, children));
     }
@@ -526,6 +585,63 @@ export function mountApp(root: string | HTMLElement): void {
         '選択をキューにダウンロード',
       ]),
     );
+  }
+
+  function startRename(path: string): void {
+    state.renamingPath = path;
+    state.chmodPath = null;
+    renderRemote();
+  }
+
+  function startChmod(path: string): void {
+    state.chmodPath = path;
+    state.renamingPath = null;
+    renderRemote();
+  }
+
+  function cancelInline(): void {
+    state.renamingPath = null;
+    state.chmodPath = null;
+    renderRemote();
+  }
+
+  async function doRename(oldPath: string, newName: string): Promise<void> {
+    if (!state.currentProfileId || newName.trim() === '') {
+      cancelInline();
+      return;
+    }
+    const to = joinRemote(parentDir(oldPath), newName.trim());
+    const ok = await guardOk('リネーム', () =>
+      api.renameRemote(state.currentProfileId as string, oldPath, to),
+    );
+    state.renamingPath = null;
+    if (ok) await loadRemote(state.remoteDir);
+    else renderRemote();
+  }
+
+  async function doChmod(path: string, modeStr: string): Promise<void> {
+    if (!state.currentProfileId) return;
+    const mode = parseMode(modeStr.trim());
+    if (mode === null) {
+      setStatus('不正なパーミッション（例: 644 / 755）', true);
+      return;
+    }
+    const ok = await guardOk('パーミッション変更', () =>
+      api.chmodRemote(state.currentProfileId as string, path, mode),
+    );
+    state.chmodPath = null;
+    if (ok) await loadRemote(state.remoteDir);
+    else renderRemote();
+  }
+
+  async function doDelete(entry: RemoteEntry): Promise<void> {
+    if (!state.currentProfileId) return;
+    const check = confirmDeletion([entry]);
+    if (check.requiresConfirm && !window.confirm(check.message)) return;
+    const ok = await guardOk('削除', () =>
+      api.deleteRemote(state.currentProfileId as string, entry.path),
+    );
+    if (ok) await loadRemote(state.remoteDir);
   }
 
   async function enqueueSelectedDownloads(): Promise<void> {

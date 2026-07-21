@@ -61,6 +61,9 @@ export const IPC = {
   cancelAllTasks: 'queue:cancelAll',
   prepareDownload: 'remote:prepareDownload',
   download: 'remote:download',
+  renameRemote: 'remote:rename',
+  deleteRemote: 'remote:delete',
+  chmodRemote: 'remote:chmod',
   listBackups: 'backup:list',
   restoreBackup: 'backup:restore',
   isSecretStorageAvailable: 'secret:available',
@@ -100,6 +103,9 @@ export interface SftpsApi {
   cancelAllTasks(): Promise<void>;
   prepareDownload(id: string, remotePath: string, savePath: string): Promise<DownloadPreview>;
   download(id: string, remotePath: string, savePath: string): Promise<DownloadResult>;
+  renameRemote(id: string, from: string, to: string): Promise<void>;
+  deleteRemote(id: string, remotePath: string): Promise<void>;
+  chmodRemote(id: string, remotePath: string, mode: number): Promise<void>;
   listBackups(id: string, remotePath: string): Promise<BackupInfo[]>;
   restoreBackup(id: string, remotePath: string, timestamp?: Date): Promise<{ bytesWritten: number }>;
   isSecretStorageAvailable(): Promise<boolean>;

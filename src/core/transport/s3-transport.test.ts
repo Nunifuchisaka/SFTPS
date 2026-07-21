@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { S3Transport, type S3ClientLike } from './s3-transport';
+import type { RemoteTransport } from './types';
 
 interface ListResponse {
   CommonPrefixes?: Array<{ Prefix?: string }>;
@@ -11,6 +12,7 @@ class FakeS3Client implements S3ClientLike {
   listByPrefix = new Map<string, ListResponse>();
   puts: Array<{ Key: string; Body: Buffer }> = [];
   deletes: string[] = [];
+  copies: Array<{ CopySource: string; Key: string }> = [];
   destroyed = false;
 
   async send(command: { constructor: { name: string }; input: any }): Promise<any> {
@@ -31,6 +33,15 @@ class FakeS3Client implements S3ClientLike {
         const buf = typeof body === 'string' ? Buffer.from(body) : Buffer.from((body as Buffer) ?? Buffer.alloc(0));
         this.objects.set(key, buf);
         this.puts.push({ Key: key, Body: buf });
+        return {};
+      }
+      case 'CopyObjectCommand': {
+        const source = String(input.CopySource);
+        const key = String(input.Key);
+        this.copies.push({ CopySource: source, Key: key });
+        const sourceKey = source.slice(source.indexOf('/') + 1);
+        const buf = this.objects.get(sourceKey);
+        if (buf) this.objects.set(key, buf);
         return {};
       }
       case 'DeleteObjectCommand': {
@@ -138,5 +149,21 @@ describe('S3Transport', () => {
     const marker = fake.puts.find((p) => p.Key === 'photos/newdir/');
     expect(marker).toBeDefined();
     expect(marker!.Body.length).toBe(0);
+  });
+
+  it('rename copies to the new key then deletes the old (no native rename)', async () => {
+    const fake = new FakeS3Client();
+    fake.objects.set('old/a.txt', Buffer.from('data'));
+    const t = new S3Transport(fake, 'my-bucket');
+    await t.rename('/old/a.txt', '/new/a.txt');
+    expect(fake.copies).toContainEqual({ CopySource: 'my-bucket/old/a.txt', Key: 'new/a.txt' });
+    expect(fake.deletes).toContain('old/a.txt');
+    expect(fake.objects.has('new/a.txt')).toBe(true);
+    expect(fake.objects.has('old/a.txt')).toBe(false);
+  });
+
+  it('does not expose chmod (S3 uses ACLs, not POSIX modes)', () => {
+    const t: RemoteTransport = new S3Transport(new FakeS3Client(), 'my-bucket');
+    expect(t.chmod).toBeUndefined();
   });
 });

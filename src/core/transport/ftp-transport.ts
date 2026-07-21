@@ -20,6 +20,7 @@ export interface FtpClientLike {
   uploadFrom(source: NodeJS.ReadableStream, toRemotePath: string): Promise<unknown>;
   remove(path: string): Promise<unknown>;
   ensureDir(remoteDirPath: string): Promise<unknown>;
+  rename(path: string, newPath: string): Promise<unknown>;
 }
 
 /** basic-ftp の Client を RemoteTransport に適合させるアダプタ。 */
@@ -80,5 +81,9 @@ export class FtpTransport implements RemoteTransport {
 
   async mkdir(remotePath: string): Promise<void> {
     await this.client.ensureDir(remotePath);
+  }
+
+  async rename(from: string, to: string): Promise<void> {
+    await this.client.rename(from, to);
   }
 }

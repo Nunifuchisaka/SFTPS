@@ -22,6 +22,9 @@ const api: SftpsApi = {
     ipcRenderer.invoke(IPC.prepareDownload, id, remotePath, savePath),
   download: (id, remotePath, savePath) =>
     ipcRenderer.invoke(IPC.download, id, remotePath, savePath),
+  renameRemote: (id, from, to) => ipcRenderer.invoke(IPC.renameRemote, id, from, to),
+  deleteRemote: (id, remotePath) => ipcRenderer.invoke(IPC.deleteRemote, id, remotePath),
+  chmodRemote: (id, remotePath, mode) => ipcRenderer.invoke(IPC.chmodRemote, id, remotePath, mode),
   listBackups: (id, remotePath) => ipcRenderer.invoke(IPC.listBackups, id, remotePath),
   restoreBackup: (id, remotePath, timestamp) =>
     ipcRenderer.invoke(IPC.restoreBackup, id, remotePath, timestamp),

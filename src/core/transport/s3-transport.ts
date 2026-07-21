@@ -1,4 +1,5 @@
 import {
+  CopyObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
@@ -16,6 +17,7 @@ export interface S3ClientLike {
   send(command: PutObjectCommand): Promise<unknown>;
   send(command: DeleteObjectCommand): Promise<unknown>;
   send(command: HeadObjectCommand): Promise<unknown>;
+  send(command: CopyObjectCommand): Promise<unknown>;
   destroy?(): void;
 }
 
@@ -132,5 +134,19 @@ export class S3Transport implements RemoteTransport {
     await this.client.send(
       new PutObjectCommand({ Bucket: this.bucket, Key: toPrefix(remotePath), Body: '' }),
     );
+  }
+
+  /** S3 にネイティブな rename は無いため copy + delete で疑似実装する。 */
+  async rename(from: string, to: string): Promise<void> {
+    const fromKey = toKey(from);
+    const toKeyValue = toKey(to);
+    await this.client.send(
+      new CopyObjectCommand({
+        Bucket: this.bucket,
+        CopySource: `${this.bucket}/${fromKey}`,
+        Key: toKeyValue,
+      }),
+    );
+    await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: fromKey }));
   }
 }

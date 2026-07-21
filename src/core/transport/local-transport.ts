@@ -1,4 +1,4 @@
-import { readdir, readFile, writeFile, mkdir, rm, stat } from 'node:fs/promises';
+import { readdir, readFile, writeFile, mkdir, rm, stat, rename, chmod } from 'node:fs/promises';
 import path from 'node:path';
 import type { RemoteEntry, RemoteTransport } from './types';
 import { posixJoin, toPosixPath } from './path-utils';
@@ -66,6 +66,14 @@ export class LocalTransport implements RemoteTransport {
 
   async mkdir(remotePath: string): Promise<void> {
     await mkdir(this.resolve(remotePath), { recursive: true });
+  }
+
+  async rename(from: string, to: string): Promise<void> {
+    await rename(this.resolve(from), this.resolve(to));
+  }
+
+  async chmod(remotePath: string, mode: number): Promise<void> {
+    await chmod(this.resolve(remotePath), mode);
   }
 
   private resolve(remotePath: string): string {

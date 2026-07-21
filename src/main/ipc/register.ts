@@ -60,6 +60,15 @@ export function registerIpc(service: AppService, queue: TransferQueue): void {
   ipcMain.handle(IPC.download, (_e, id: string, remote: string, save: string) =>
     service.download(id, remote, save),
   );
+  ipcMain.handle(IPC.renameRemote, (_e, id: string, from: string, to: string) =>
+    service.renameRemote(id, from, to),
+  );
+  ipcMain.handle(IPC.deleteRemote, (_e, id: string, remote: string) =>
+    service.deleteRemote(id, remote),
+  );
+  ipcMain.handle(IPC.chmodRemote, (_e, id: string, remote: string, mode: number) =>
+    service.chmodRemote(id, remote, mode),
+  );
   ipcMain.handle(IPC.listBackups, (_e, id: string, remote: string) =>
     service.listBackups(id, remote),
   );

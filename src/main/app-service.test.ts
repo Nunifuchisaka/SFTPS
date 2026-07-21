@@ -166,6 +166,30 @@ describe('AppService', () => {
     expect((await service.restoreBackup('p1', '/site/a.txt')).bytesWritten).toBe(3);
   });
 
+  it('renameRemote moves a remote file', async () => {
+    await service.saveProfile(ftpProfile);
+    await transport.connect();
+    await transport.writeFile('/a.txt', Buffer.from('hi'));
+    await service.renameRemote('p1', '/a.txt', '/b.txt');
+    expect(await transport.exists('/a.txt')).toBe(false);
+    expect((await transport.readFile('/b.txt')).toString()).toBe('hi');
+  });
+
+  it('deleteRemote removes a remote file', async () => {
+    await service.saveProfile(ftpProfile);
+    await transport.connect();
+    await transport.writeFile('/gone.txt', Buffer.from('x'));
+    await service.deleteRemote('p1', '/gone.txt');
+    expect(await transport.exists('/gone.txt')).toBe(false);
+  });
+
+  it('chmodRemote applies a mode when the transport supports it', async () => {
+    await service.saveProfile(ftpProfile);
+    await transport.connect();
+    await transport.writeFile('/c.txt', Buffer.from('x'));
+    await expect(service.chmodRemote('p1', '/c.txt', 0o644)).resolves.toBeUndefined();
+  });
+
   it('download writes the remote file to a local path', async () => {
     await service.saveProfile(ftpProfile);
     await transport.connect();

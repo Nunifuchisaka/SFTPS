@@ -21,4 +21,8 @@ export interface RemoteTransport {
   exists(remotePath: string): Promise<boolean>;
   delete(remotePath: string): Promise<void>;
   mkdir(remotePath: string): Promise<void>;
+  /** リネーム/移動。プロトコル非対応の場合は未実装（undefined）。 */
+  rename?(from: string, to: string): Promise<void>;
+  /** パーミッション変更。プロトコル非対応の場合は未実装（undefined）。 */
+  chmod?(remotePath: string, mode: number): Promise<void>;
 }

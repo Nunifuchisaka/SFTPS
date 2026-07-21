@@ -190,6 +190,27 @@ export class AppService {
     return { local, localPath: `/${path.basename(savePath)}` };
   }
 
+  /** リモートファイル/ディレクトリをリネーム（移動）する。 */
+  async renameRemote(id: string, from: string, to: string): Promise<void> {
+    return this.withTransport(id, async (transport) => {
+      if (!transport.rename) throw new Error('rename is not supported by this transport');
+      await transport.rename(from, to);
+    });
+  }
+
+  /** リモートファイル/ディレクトリを削除する。 */
+  async deleteRemote(id: string, remotePath: string): Promise<void> {
+    return this.withTransport(id, (transport) => transport.delete(remotePath));
+  }
+
+  /** リモートファイルのパーミッションを変更する（対応トランスポートのみ）。 */
+  async chmodRemote(id: string, remotePath: string, mode: number): Promise<void> {
+    return this.withTransport(id, async (transport) => {
+      if (!transport.chmod) throw new Error('chmod is not supported by this transport');
+      await transport.chmod(remotePath, mode);
+    });
+  }
+
   async listBackups(id: string, remotePath: string): Promise<BackupInfo[]> {
     return this.deps.backupManager.listBackups(id, remotePath);
   }

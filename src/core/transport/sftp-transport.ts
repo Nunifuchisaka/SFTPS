@@ -21,6 +21,8 @@ export interface SftpClientLike {
   exists(remotePath: string): Promise<false | string>;
   delete(remotePath: string): Promise<unknown>;
   mkdir(remotePath: string, recursive?: boolean): Promise<unknown>;
+  rename(fromPath: string, toPath: string): Promise<unknown>;
+  chmod(remotePath: string, mode: number): Promise<unknown>;
 }
 
 /** ssh2-sftp-client の Client を RemoteTransport に適合させるアダプタ。 */
@@ -68,5 +70,13 @@ export class SftpTransport implements RemoteTransport {
 
   async mkdir(remotePath: string): Promise<void> {
     await this.client.mkdir(remotePath, true);
+  }
+
+  async rename(from: string, to: string): Promise<void> {
+    await this.client.rename(from, to);
+  }
+
+  async chmod(remotePath: string, mode: number): Promise<void> {
+    await this.client.chmod(remotePath, mode);
   }
 }

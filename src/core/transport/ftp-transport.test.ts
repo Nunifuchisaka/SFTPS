@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { FileType } from 'basic-ftp';
 import { FtpTransport, type FtpClientLike, type FtpFileInfo } from './ftp-transport';
+import type { RemoteTransport } from './types';
 
 class FakeFtpClient implements FtpClientLike {
   accessCalls: unknown[] = [];
@@ -43,6 +44,11 @@ class FakeFtpClient implements FtpClientLike {
   }
   async ensureDir(path: string): Promise<unknown> {
     this.ensured.push(path);
+    return {};
+  }
+  renamed: Array<{ from: string; to: string }> = [];
+  async rename(from: string, to: string): Promise<unknown> {
+    this.renamed.push({ from, to });
     return {};
   }
 }
@@ -103,5 +109,17 @@ describe('FtpTransport', () => {
     await t.mkdir('/pub/new');
     expect(fake.removed).toEqual(['/pub/x.txt']);
     expect(fake.ensured).toEqual(['/pub/new']);
+  });
+
+  it('rename calls the client rename with from/to', async () => {
+    const fake = new FakeFtpClient();
+    const t = new FtpTransport(fake);
+    await t.rename('/pub/a.txt', '/pub/b.txt');
+    expect(fake.renamed).toEqual([{ from: '/pub/a.txt', to: '/pub/b.txt' }]);
+  });
+
+  it('does not expose chmod (FTP has no portable chmod)', () => {
+    const t: RemoteTransport = new FtpTransport(new FakeFtpClient());
+    expect(t.chmod).toBeUndefined();
   });
 });

@@ -59,4 +59,17 @@ describe('LocalTransport', () => {
   it('rejects path traversal outside the root', async () => {
     await expect(t.readFile('/../escape.txt')).rejects.toThrow();
   });
+
+  it('rename moves a file to a new path', async () => {
+    await t.writeFile('/old.txt', Buffer.from('data'));
+    await t.rename?.('/old.txt', '/renamed.txt');
+    expect(await t.exists('/old.txt')).toBe(false);
+    expect((await t.readFile('/renamed.txt')).toString()).toBe('data');
+  });
+
+  it('chmod changes the mode where supported', async () => {
+    await t.writeFile('/perm.txt', Buffer.from('x'));
+    // Windows では反映が限定的なため、呼び出しが例外にならないことを確認する。
+    await expect(t.chmod?.('/perm.txt', 0o644)).resolves.toBeUndefined();
+  });
 });
