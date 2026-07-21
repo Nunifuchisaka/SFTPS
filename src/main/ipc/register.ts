@@ -3,14 +3,33 @@ import { homedir } from 'node:os';
 import { IPC, type SyncFolderOptions, type TransferRequest } from '../../shared/ipc';
 import type { Profile } from '../../core/profile/index';
 import type { TransferQueue } from '../../core/queue/index';
+import type { HistoryEntry, HistoryFilter, HistoryInput } from '../../core/history/index';
 import type { AppService } from '../app-service';
 import { listLocalDir } from '../local-fs';
+import { taskToHistoryInput } from '../history-recorder';
+
+/** 履歴の記録・参照口（永続化を内包）。 */
+export interface HistoryController {
+  append(input: HistoryInput): void;
+  list(filter?: HistoryFilter): HistoryEntry[];
+  clear(): void;
+}
 
 /** AppService のメソッドを ipcMain.handle に結線する。ここはロジックを持たない薄い層。 */
-export function registerIpc(service: AppService, queue: TransferQueue): void {
+export function registerIpc(
+  service: AppService,
+  queue: TransferQueue,
+  history: HistoryController,
+): void {
+  let seq = 0;
+  const genId = (): string => `op${Date.now()}-${seq++}`;
+  const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
   // キューは run() 実行中に新規タスクを拾わないため、投入のたびに
   // 「未処理が無くなるまで run を回す」ドライバで駆動する。
+  // 完走後、終端タスクを id 重複排除して一度だけ履歴へ記録する（リトライ中の中間失敗を残さない）。
   let draining = false;
+  const recorded = new Set<string>();
   const drive = async (): Promise<void> => {
     if (draining) return;
     draining = true;
@@ -20,10 +39,16 @@ export function registerIpc(service: AppService, queue: TransferQueue): void {
       }
     } finally {
       draining = false;
+      for (const task of queue.list()) {
+        if ((task.status === 'succeeded' || task.status === 'failed') && !recorded.has(task.id)) {
+          recorded.add(task.id);
+          const input = taskToHistoryInput(task);
+          if (input) history.append(input);
+        }
+      }
     }
   };
 
-  let seq = 0;
   ipcMain.handle(IPC.enqueueTransfer, (_e, request: TransferRequest) => {
     const id = `t${Date.now()}-${seq++}`;
     queue.add({ id, kind: request.kind, label: request.label, payload: request });
@@ -32,6 +57,8 @@ export function registerIpc(service: AppService, queue: TransferQueue): void {
   });
   ipcMain.handle(IPC.queueStatus, () => ({ tasks: queue.list(), overall: queue.overall() }));
   ipcMain.handle(IPC.cancelAllTasks, () => queue.cancelAll());
+  ipcMain.handle(IPC.historyList, (_e, filter?: HistoryFilter) => history.list(filter));
+  ipcMain.handle(IPC.historyClear, () => history.clear());
 
   ipcMain.handle(IPC.listProfiles, () => service.listProfiles());
   ipcMain.handle(IPC.saveProfile, (_e, input: Profile) => service.saveProfile(input));
@@ -60,15 +87,54 @@ export function registerIpc(service: AppService, queue: TransferQueue): void {
   ipcMain.handle(IPC.download, (_e, id: string, remote: string, save: string) =>
     service.download(id, remote, save),
   );
-  ipcMain.handle(IPC.renameRemote, (_e, id: string, from: string, to: string) =>
-    service.renameRemote(id, from, to),
-  );
-  ipcMain.handle(IPC.deleteRemote, (_e, id: string, remote: string) =>
-    service.deleteRemote(id, remote),
-  );
-  ipcMain.handle(IPC.chmodRemote, (_e, id: string, remote: string, mode: number) =>
-    service.chmodRemote(id, remote, mode),
-  );
+  ipcMain.handle(IPC.renameRemote, async (_e, id: string, from: string, to: string) => {
+    try {
+      await service.renameRemote(id, from, to);
+      history.append({ id: genId(), kind: 'rename', profileId: id, path: to, status: 'success' });
+    } catch (err) {
+      history.append({
+        id: genId(),
+        kind: 'rename',
+        profileId: id,
+        path: from,
+        status: 'failed',
+        error: errorMessage(err),
+      });
+      throw err;
+    }
+  });
+  ipcMain.handle(IPC.deleteRemote, async (_e, id: string, remote: string) => {
+    try {
+      await service.deleteRemote(id, remote);
+      history.append({ id: genId(), kind: 'delete', profileId: id, path: remote, status: 'success' });
+    } catch (err) {
+      history.append({
+        id: genId(),
+        kind: 'delete',
+        profileId: id,
+        path: remote,
+        status: 'failed',
+        error: errorMessage(err),
+      });
+      throw err;
+    }
+  });
+  ipcMain.handle(IPC.chmodRemote, async (_e, id: string, remote: string, mode: number) => {
+    try {
+      await service.chmodRemote(id, remote, mode);
+      history.append({ id: genId(), kind: 'chmod', profileId: id, path: remote, status: 'success' });
+    } catch (err) {
+      history.append({
+        id: genId(),
+        kind: 'chmod',
+        profileId: id,
+        path: remote,
+        status: 'failed',
+        error: errorMessage(err),
+      });
+      throw err;
+    }
+  });
   ipcMain.handle(IPC.listBackups, (_e, id: string, remote: string) =>
     service.listBackups(id, remote),
   );

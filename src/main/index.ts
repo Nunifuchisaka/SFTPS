@@ -8,7 +8,9 @@ import { SecretStore } from './secret-store';
 import { createTransport, defaultTransportDeps, type TransportFactoryDeps } from './transport-factory';
 import { KnownHostsFile } from './known-hosts-store';
 import { createAppTransferQueue } from './transfer-queue-factory';
-import { registerIpc } from './ipc/register';
+import { HistoryFile } from './history-store';
+import { registerIpc, type HistoryController } from './ipc/register';
+import type { HistoryFilter, HistoryInput } from '../core/history/index';
 
 async function createService(): Promise<AppService> {
   const userData = app.getPath('userData');
@@ -41,6 +43,23 @@ async function createService(): Promise<AppService> {
   });
 }
 
+async function createHistoryController(): Promise<HistoryController> {
+  const userData = app.getPath('userData');
+  const historyFile = new HistoryFile(join(userData, 'history.json'));
+  const history = await historyFile.load();
+  return {
+    append: (input: HistoryInput) => {
+      history.append(input);
+      void historyFile.save(history);
+    },
+    list: (filter?: HistoryFilter) => history.list(filter),
+    clear: () => {
+      history.clear();
+      void historyFile.save(history);
+    },
+  };
+}
+
 function createWindow(): void {
   const win = new BrowserWindow({
     width: 1180,
@@ -64,7 +83,8 @@ function createWindow(): void {
 
 void app.whenReady().then(async () => {
   const service = await createService();
-  registerIpc(service, createAppTransferQueue(service));
+  const history = await createHistoryController();
+  registerIpc(service, createAppTransferQueue(service), history);
   createWindow();
 
   app.on('activate', () => {

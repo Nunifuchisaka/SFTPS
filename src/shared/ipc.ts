@@ -5,6 +5,7 @@ import type { DownloadPreview, DownloadResult } from '../core/download/index';
 import type { BackupInfo } from '../core/backup/index';
 import type { CompareBy, PlanSummary, RunSyncResult, SyncAction } from '../core/sync/index';
 import type { OverallProgress, TransferTask } from '../core/queue/index';
+import type { HistoryEntry, HistoryFilter } from '../core/history/index';
 
 export interface ConnectionResult {
   ok: boolean;
@@ -64,6 +65,8 @@ export const IPC = {
   renameRemote: 'remote:rename',
   deleteRemote: 'remote:delete',
   chmodRemote: 'remote:chmod',
+  historyList: 'history:list',
+  historyClear: 'history:clear',
   listBackups: 'backup:list',
   restoreBackup: 'backup:restore',
   isSecretStorageAvailable: 'secret:available',
@@ -106,6 +109,8 @@ export interface SftpsApi {
   renameRemote(id: string, from: string, to: string): Promise<void>;
   deleteRemote(id: string, remotePath: string): Promise<void>;
   chmodRemote(id: string, remotePath: string, mode: number): Promise<void>;
+  historyList(filter?: HistoryFilter): Promise<HistoryEntry[]>;
+  historyClear(): Promise<void>;
   listBackups(id: string, remotePath: string): Promise<BackupInfo[]>;
   restoreBackup(id: string, remotePath: string, timestamp?: Date): Promise<{ bytesWritten: number }>;
   isSecretStorageAvailable(): Promise<boolean>;

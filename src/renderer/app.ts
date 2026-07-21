@@ -13,6 +13,8 @@ import {
   type DroppedItem,
 } from '../core/browse/index';
 import { confirmDeletion, parseMode, isActionAvailable } from '../core/remoteops/index';
+import type { HistoryFilter, HistoryKind, HistoryStatus } from '../core/history/index';
+import { createHistoryView } from './history-view';
 import type { QueueStatus, SyncFolderOptions } from '../shared/ipc';
 import { createDiffView, diffOrientationLabels } from './diff-view';
 import { createSyncPlanView } from './sync-view';
@@ -74,6 +76,7 @@ interface State {
   remoteSelection: Set<string>;
   renamingPath: string | null;
   chmodPath: string | null;
+  historyFilter: HistoryFilter;
 }
 
 export function mountApp(root: string | HTMLElement): void {
@@ -99,6 +102,7 @@ export function mountApp(root: string | HTMLElement): void {
     remoteSelection: new Set(),
     renamingPath: null,
     chmodPath: null,
+    historyFilter: {},
   };
 
   function currentProtocol(): Protocol | null {
@@ -121,6 +125,7 @@ export function mountApp(root: string | HTMLElement): void {
   const syncPanel = h('div', { class: 'sync_1' });
   const syncPlanPanel = h('div', { class: 'diffwrap_1' });
   const queuePanel = h('div', { class: 'queue_1' });
+  const historyPanel = h('div', { class: 'history_wrap_1' });
 
   function setStatus(msg: string, isError = false): void {
     statusBar.textContent = msg;
@@ -1014,6 +1019,59 @@ export function mountApp(root: string | HTMLElement): void {
     );
   }
 
+  // ---- history --------------------------------------------------------------
+  async function refreshHistory(): Promise<void> {
+    const entries = await api.historyList(state.historyFilter);
+    renderHistory(entries);
+  }
+
+  function renderHistory(entries: Parameters<typeof createHistoryView>[0]): void {
+    historyPanel.replaceChildren();
+
+    const kindSel = h('select', { class: 'form_1__input' }, [
+      h('option', { value: '' }, ['種別: すべて']),
+      ...(['upload', 'download', 'sync', 'rename', 'delete', 'chmod'] as HistoryKind[]).map((k) =>
+        h('option', { value: k }, [k]),
+      ),
+    ]) as HTMLSelectElement;
+    kindSel.value = state.historyFilter.kind ?? '';
+    kindSel.addEventListener('change', () => {
+      state.historyFilter = { ...state.historyFilter, kind: (kindSel.value || undefined) as HistoryKind | undefined };
+      void refreshHistory();
+    });
+
+    const statusSel = h('select', { class: 'form_1__input' }, [
+      h('option', { value: '' }, ['状態: すべて']),
+      h('option', { value: 'success' }, ['success']),
+      h('option', { value: 'failed' }, ['failed']),
+    ]) as HTMLSelectElement;
+    statusSel.value = state.historyFilter.status ?? '';
+    statusSel.addEventListener('change', () => {
+      state.historyFilter = {
+        ...state.historyFilter,
+        status: (statusSel.value || undefined) as HistoryStatus | undefined,
+      };
+      void refreshHistory();
+    });
+
+    const clearBtn = h(
+      'button',
+      {
+        class: 'btn_1',
+        onclick: () => {
+          void api.historyClear().then(() => refreshHistory());
+        },
+      },
+      ['履歴クリア'],
+    );
+
+    historyPanel.append(
+      h('h2', {}, ['転送履歴']),
+      h('div', { class: 'browser_1__tools' }, [kindSel, statusSel, clearBtn]),
+      createHistoryView(entries),
+    );
+  }
+
   // ---- boot -----------------------------------------------------------------
   const hiddenChk = h('input', { type: 'checkbox' }) as HTMLInputElement;
   hiddenChk.checked = state.showHidden;
@@ -1032,7 +1090,13 @@ export function mountApp(root: string | HTMLElement): void {
     h('main', { class: 'layout_1' }, [
       h('section', { class: 'layout_1__col' }, [profilePanel]),
       h('section', { class: 'layout_1__col' }, [localPanel, remotePanel]),
-      h('section', { class: 'layout_1__col' }, [transferPanel, syncPanel, backupPanel, queuePanel]),
+      h('section', { class: 'layout_1__col' }, [
+        transferPanel,
+        syncPanel,
+        backupPanel,
+        queuePanel,
+        historyPanel,
+      ]),
     ]),
     statusBar,
   );
@@ -1052,6 +1116,10 @@ export function mountApp(root: string | HTMLElement): void {
     renderTransfer();
     renderSync();
     await refreshQueue();
-    window.setInterval(() => void refreshQueue(), 1500);
+    await refreshHistory();
+    window.setInterval(() => {
+      void refreshQueue();
+      void refreshHistory();
+    }, 1500);
   })();
 }
