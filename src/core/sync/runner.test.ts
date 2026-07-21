@@ -76,4 +76,97 @@ describe('runSync (integration, two LocalTransports, no mocks)', () => {
     expect(await dest.exists('/extra.txt')).toBe(false);
     expect(result.deleted).toBe(1);
   });
+
+  it('backs up an extraneous file before deleting it', async () => {
+    await writeFile(join(srcRoot, 'keep.txt'), Buffer.from('keep'));
+    await writeFile(join(dstRoot, 'keep.txt'), Buffer.from('keep'));
+    await writeFile(join(dstRoot, 'extra.txt'), Buffer.from('bye'));
+
+    const plan = planSync(await walkTree(source, '/'), await walkTree(dest, '/'), {
+      compareBy: 'size',
+      deleteExtraneous: true,
+    });
+    const result = await runSync(source, dest, plan, { backupManager, profileId: 'p1' });
+
+    expect(await dest.exists('/extra.txt')).toBe(false);
+    const backups = await backupManager.listBackups('p1', '/extra.txt');
+    expect(backups).toHaveLength(1);
+    expect((await backupManager.restore('p1', '/extra.txt')).toString()).toBe('bye');
+    expect(result.backups).toContain(backups[0].path);
+  });
+
+  it('does nothing when the signal is already aborted', async () => {
+    await writeFile(join(srcRoot, 'a.txt'), Buffer.from('a'));
+    const plan = planSync(await walkTree(source, '/'), await walkTree(dest, '/'));
+    const controller = new AbortController();
+    controller.abort();
+
+    const result = await runSync(source, dest, plan, {
+      backupManager,
+      profileId: 'p1',
+      signal: controller.signal,
+    });
+
+    expect(result.uploaded).toBe(0);
+    expect(result.canceled).toBe(true);
+    expect(await dest.exists('/a.txt')).toBe(false);
+  });
+
+  it('stops at the next file boundary once aborted mid-run', async () => {
+    for (const name of ['a.txt', 'b.txt', 'c.txt']) {
+      await writeFile(join(srcRoot, name), Buffer.from(name));
+    }
+    const plan = planSync(await walkTree(source, '/'), await walkTree(dest, '/'));
+    const controller = new AbortController();
+    // 1 ファイル読み終えた時点でキャンセル要求が入る状況を作る。
+    const abortingSource = Object.create(source) as typeof source;
+    abortingSource.readFile = async (p: string) => {
+      const data = await source.readFile(p);
+      controller.abort();
+      return data;
+    };
+
+    const result = await runSync(abortingSource, dest, plan, {
+      backupManager,
+      profileId: 'p1',
+      signal: controller.signal,
+    });
+
+    expect(result.uploaded).toBe(1);
+    expect(result.canceled).toBe(true);
+    expect((await dest.list('/')).map((e) => e.name)).toEqual(['a.txt']);
+  });
+
+  it('skips pending mirror deletions when aborted', async () => {
+    await writeFile(join(dstRoot, 'extra.txt'), Buffer.from('bye'));
+    const plan = planSync(await walkTree(source, '/'), await walkTree(dest, '/'), {
+      deleteExtraneous: true,
+    });
+    const controller = new AbortController();
+    controller.abort();
+
+    const result = await runSync(source, dest, plan, {
+      backupManager,
+      profileId: 'p1',
+      signal: controller.signal,
+    });
+
+    expect(result.deleted).toBe(0);
+    expect(await dest.exists('/extra.txt')).toBe(true);
+  });
+
+  it('backs up files inside an extraneous directory before removing the directory', async () => {
+    await mkdir(join(dstRoot, 'old'));
+    await writeFile(join(dstRoot, 'old', 'x.txt'), Buffer.from('inside'));
+
+    const plan = planSync(await walkTree(source, '/'), await walkTree(dest, '/'), {
+      compareBy: 'size',
+      deleteExtraneous: true,
+    });
+    const result = await runSync(source, dest, plan, { backupManager, profileId: 'p1' });
+
+    expect(await dest.exists('/old')).toBe(false);
+    expect((await backupManager.restore('p1', '/old/x.txt')).toString()).toBe('inside');
+    expect(result.deleted).toBe(2);
+  });
 });

@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { stripSecrets, type FtpProfile, type SftpProfile, type S3Profile } from '../core/profile/index';
-import { profileToFormValues, buildProfileFromForm, emptyFormValues } from './profile-form';
+import {
+  profileToFormValues,
+  buildProfileFromForm,
+  buildClearSecretsFromForm,
+  emptyFormValues,
+} from './profile-form';
 
 const ftp: FtpProfile = {
   id: 'f1', name: 'FTP', protocol: 'ftp', host: 'h', port: 21, user: 'u',
@@ -66,5 +71,26 @@ describe('buildProfileFromForm secret handling', () => {
   it('includes a secret when entered (update)', () => {
     const fv = { ...emptyFormValues(), protocol: 'ftp' as const, id: 'x', name: 'x', host: 'h', port: 21, user: 'u', password: 'secret' };
     expect((buildProfileFromForm(fv) as FtpProfile).password).toBe('secret');
+  });
+});
+
+describe('buildClearSecretsFromForm', () => {
+  it('returns nothing when no clear box is checked', () => {
+    expect(buildClearSecretsFromForm(emptyFormValues())).toEqual([]);
+  });
+
+  it('returns the checked secret keys for an sftp profile', () => {
+    const fv = { ...emptyFormValues(), protocol: 'sftp' as const, clearSecrets: ['privateKey' as const, 'passphrase' as const] };
+    expect(buildClearSecretsFromForm(fv)).toEqual(['privateKey', 'passphrase']);
+  });
+
+  it('drops keys that do not belong to the selected protocol', () => {
+    const fv = { ...emptyFormValues(), protocol: 'ftp' as const, clearSecrets: ['password' as const, 'privateKey' as const] };
+    expect(buildClearSecretsFromForm(fv)).toEqual(['password']);
+  });
+
+  it('keeps only the s3 secret keys for an s3 profile', () => {
+    const fv = { ...emptyFormValues(), protocol: 's3' as const, clearSecrets: ['secretAccessKey' as const, 'password' as const] };
+    expect(buildClearSecretsFromForm(fv)).toEqual(['secretAccessKey']);
   });
 });

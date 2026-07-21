@@ -6,6 +6,7 @@ import {
   extractSecrets,
   resolveFtpSecurity,
   resolveSecretUpdate,
+  mergeSecrets,
   serializeProfiles,
   parseProfiles,
   type FtpProfile,
@@ -131,6 +132,47 @@ describe('resolveSecretUpdate', () => {
 
   it('clears only on an explicit clear request', () => {
     expect(resolveSecretUpdate('', true, true)).toEqual({ action: 'clear' });
+  });
+});
+
+describe('mergeSecrets', () => {
+  const existing = { password: 'oldpw', privateKey: 'OLDKEY' };
+
+  it('keeps existing secrets that are absent from the incoming set', () => {
+    expect(mergeSecrets(existing, { passphrase: 'newphrase' })).toEqual({
+      password: 'oldpw',
+      privateKey: 'OLDKEY',
+      passphrase: 'newphrase',
+    });
+  });
+
+  it('keeps every existing secret when nothing is entered', () => {
+    expect(mergeSecrets(existing, {})).toEqual(existing);
+  });
+
+  it('overwrites only the entered secret', () => {
+    expect(mergeSecrets(existing, { password: 'newpw' })).toEqual({
+      password: 'newpw',
+      privateKey: 'OLDKEY',
+    });
+  });
+
+  it('removes only the explicitly cleared secret', () => {
+    expect(mergeSecrets(existing, {}, ['password'])).toEqual({ privateKey: 'OLDKEY' });
+  });
+
+  it('lets an explicit clear win over a value left in the field', () => {
+    expect(mergeSecrets(existing, { password: 'typed' }, ['password'])).toEqual({
+      privateKey: 'OLDKEY',
+    });
+  });
+
+  it('ignores non-secret keys in the incoming set', () => {
+    expect(mergeSecrets({}, { accessKeyId: 'AKIA' } as Record<string, string>)).toEqual({});
+  });
+
+  it('returns an empty record when everything is cleared', () => {
+    expect(mergeSecrets(existing, {}, ['password', 'privateKey'])).toEqual({});
   });
 });
 

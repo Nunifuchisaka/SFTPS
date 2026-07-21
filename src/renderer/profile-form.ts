@@ -3,7 +3,15 @@ import {
   type FtpSecurity,
   type Profile,
   type Protocol,
+  type SecretKey,
 } from '../core/profile/index';
+
+/** プロトコルごとに保持しうるシークレット項目。 */
+export const SECRET_KEYS_BY_PROTOCOL: Record<Protocol, SecretKey[]> = {
+  ftp: ['password'],
+  sftp: ['password', 'privateKey', 'passphrase'],
+  s3: ['secretAccessKey', 'sessionToken'],
+};
 
 /** プロファイル編集フォームのフラットな値表現。protocol ごとの全項目を含む。 */
 export interface FormValues {
@@ -25,6 +33,8 @@ export interface FormValues {
   /** 接続タイムアウト（ミリ秒）。空文字＝未設定。 */
   connectTimeoutMs: string;
   autoReconnect: boolean;
+  /** 「このシークレットを削除」がチェックされた項目（空欄据え置きとは別の明示クリア）。 */
+  clearSecrets: SecretKey[];
 }
 
 /** 新規作成用の既定フォーム値（安全側の既定: ftpSecurity=explicit, hostKeyPolicy=tofu）。 */
@@ -47,7 +57,17 @@ export function emptyFormValues(): FormValues {
     secretAccessKey: '',
     connectTimeoutMs: '',
     autoReconnect: false,
+    clearSecrets: [],
   };
+}
+
+/**
+ * 明示クリア対象のシークレット項目を、選択中プロトコルが持つ項目だけに絞って返す。
+ * 空欄（据え置き）とは別経路であり、ここに含めた項目のみが実際に削除される。
+ */
+export function buildClearSecretsFromForm(v: FormValues): SecretKey[] {
+  const allowed = SECRET_KEYS_BY_PROTOCOL[v.protocol];
+  return v.clearSecrets.filter((key) => allowed.includes(key));
 }
 
 /**
@@ -82,7 +102,8 @@ export function profileToFormValues(profile: Profile): FormValues {
 
 /**
  * フォーム値からプロファイルを構築する。
- * 空欄のシークレットは省略する（＝AppService 側で既存シークレット据え置き）。
+ * 空欄のシークレットは省略し、AppService 側の mergeSecrets で既存値が据え置かれる。
+ * 保存済みシークレットの削除は buildClearSecretsFromForm の明示指定でのみ行われる。
  */
 export function buildProfileFromForm(v: FormValues): Profile {
   const timeout = v.connectTimeoutMs.trim() !== '' ? Number(v.connectTimeoutMs) : undefined;

@@ -1,6 +1,7 @@
 import {
   TransferQueue,
   type RetryOptions,
+  type RunContext,
   type TransferTask,
 } from '../core/queue/index';
 import type {
@@ -10,13 +11,25 @@ import type { CommitSyncResult, SyncFolderOptions, TransferRequest } from '../sh
 
 /** キューが依存する AppService のメソッド（構造的サブセット）。 */
 export interface QueueableService {
-  commitUpload(id: string, localPath: string, remotePath: string): Promise<CommitResult>;
-  download(id: string, remotePath: string, savePath: string): Promise<{ bytesWritten: number }>;
+  commitUpload(
+    id: string,
+    localPath: string,
+    remotePath: string,
+    options?: { verifyAfterTransfer?: boolean },
+    signal?: AbortSignal,
+  ): Promise<CommitResult>;
+  download(
+    id: string,
+    remotePath: string,
+    savePath: string,
+    signal?: AbortSignal,
+  ): Promise<{ bytesWritten: number }>;
   commitSync(
     id: string,
     localDir: string,
     remoteDir: string,
     options?: SyncFolderOptions,
+    signal?: AbortSignal,
   ): Promise<CommitSyncResult>;
 }
 
@@ -44,14 +57,26 @@ export function createAppTransferQueue(
   const queueOptions = {
     retry: options.retry ?? DEFAULT_RETRY,
     concurrency: options.concurrency ?? 2,
-    runTask: async (task: TransferTask): Promise<void> => {
+    // ctx.signal を実行系へ渡し、各アクションの境界で中断できるようにする。
+    runTask: async (task: TransferTask, ctx: RunContext): Promise<void> => {
       const request = task.payload as TransferRequest;
       switch (request.kind) {
         case 'upload':
-          await service.commitUpload(request.profileId, request.localPath, request.remotePath);
+          await service.commitUpload(
+            request.profileId,
+            request.localPath,
+            request.remotePath,
+            {},
+            ctx.signal,
+          );
           break;
         case 'download':
-          await service.download(request.profileId, request.remotePath, request.savePath);
+          await service.download(
+            request.profileId,
+            request.remotePath,
+            request.savePath,
+            ctx.signal,
+          );
           break;
         case 'sync':
           await service.commitSync(
@@ -59,6 +84,7 @@ export function createAppTransferQueue(
             request.localDir,
             request.remoteDir,
             request.options,
+            ctx.signal,
           );
           break;
       }

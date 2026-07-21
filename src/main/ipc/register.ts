@@ -1,6 +1,11 @@
 import { ipcMain, dialog, safeStorage } from 'electron';
 import { homedir } from 'node:os';
-import { IPC, type SyncFolderOptions, type TransferRequest } from '../../shared/ipc';
+import {
+  IPC,
+  type SaveProfileOptions,
+  type SyncFolderOptions,
+  type TransferRequest,
+} from '../../shared/ipc';
 import type { Profile } from '../../core/profile/index';
 import type { TransferQueue } from '../../core/queue/index';
 import type { HistoryEntry, HistoryFilter, HistoryInput } from '../../core/history/index';
@@ -62,7 +67,9 @@ export function registerIpc(
   ipcMain.handle(IPC.historyClear, () => history.clear());
 
   ipcMain.handle(IPC.listProfiles, () => service.listProfiles());
-  ipcMain.handle(IPC.saveProfile, (_e, input: Profile) => service.saveProfile(input));
+  ipcMain.handle(IPC.saveProfile, (_e, input: Profile, options?: SaveProfileOptions) =>
+    service.saveProfile(input, options),
+  );
   ipcMain.handle(IPC.deleteProfile, (_e, id: string) => service.deleteProfile(id));
   ipcMain.handle(IPC.testConnection, (_e, id: string) => service.testConnection(id));
   ipcMain.handle(IPC.listRemote, (_e, id: string, dir: string) => service.listRemote(id, dir));

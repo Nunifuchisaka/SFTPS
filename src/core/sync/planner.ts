@@ -74,7 +74,12 @@ export function planSync(
   if (options.deleteExtraneous) {
     for (const dest of destEntries) {
       if (!sourcePaths.has(dest.path)) {
-        actions.push({ type: 'delete-extra', path: dest.path, reason: 'extraneous' });
+        actions.push({
+          type: 'delete-extra',
+          path: dest.path,
+          reason: 'extraneous',
+          entryType: dest.type,
+        });
       }
     }
   }

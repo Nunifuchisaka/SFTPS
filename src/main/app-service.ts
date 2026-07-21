@@ -1,10 +1,18 @@
 import path from 'node:path';
 import { LocalTransport, type RemoteEntry, type RemoteTransport } from '../core/transport/index';
 import type { BackupInfo, BackupManager } from '../core/backup/index';
-import { walkTree, planSync, summarizePlan, runSync, type SyncEntry } from '../core/sync/index';
+import {
+  walkTree,
+  planSync,
+  summarizePlan,
+  runSync,
+  validateSyncDestination,
+  type SyncEntry,
+} from '../core/sync/index';
 import { establishConnection, type ReconnectOptions } from '../core/reconnect/index';
 import {
   extractSecrets,
+  mergeSecrets,
   stripSecrets,
   validateProfile,
   type Profile,
@@ -27,10 +35,25 @@ import type { ProfileStore } from './profile-store';
 import type { Secrets } from './transport-factory';
 import type {
   ConnectionResult,
+  RestoreBackupResult,
+  SaveProfileOptions,
   SyncFolderOptions,
   PrepareSyncResult,
   CommitSyncResult,
 } from '../shared/ipc';
+
+/** キャンセル済みなら転送を開始せず中止する（ファイル単位の中断境界）。 */
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new Error('transfer canceled');
+}
+
+/** シークレットレコードが同一内容か（不要な書き込みを避けるための比較）。 */
+function sameSecrets(a: Record<string, string>, b: Record<string, string>): boolean {
+  const keysA = Object.keys(a);
+  const keysB = Object.keys(b);
+  if (keysA.length !== keysB.length) return false;
+  return keysA.every((k) => a[k] === b[k]);
+}
 
 /** ブックマークの読み書き口（実体は JSON ファイル永続化）。 */
 export interface BookmarkGateway {
@@ -60,18 +83,24 @@ export class AppService {
   /**
    * プロファイルを保存する。シークレットは SecretStore へ分離し、
    * プロファイル JSON には決して平文で書かない。
-   * シークレットがあるのに暗号化が使えない場合は保存を拒否する（例外）。
+   * 空欄のシークレットは既存値を据え置き（誤消去防止）、削除は options.clearSecrets の明示指定のみ。
+   * シークレットの書き込みが必要なのに暗号化が使えない場合は保存を拒否する（例外）。
    */
-  async saveProfile(input: Profile): Promise<Profile> {
+  async saveProfile(input: Profile, options: SaveProfileOptions = {}): Promise<Profile> {
     const errors = validateProfile(input);
     if (errors.length > 0) {
       throw new Error(`invalid profile: ${errors.join(', ')}`);
     }
 
-    const secrets = extractSecrets(input);
-    if (Object.keys(secrets).length > 0) {
-      // 暗号化が使えなければここで例外 → プロファイルは永続化されない。
-      await this.deps.secretStore.setSecrets(input.id, secrets);
+    const existing = (await this.deps.secretStore.getSecrets(input.id)) ?? {};
+    const merged = mergeSecrets(existing, extractSecrets(input), options.clearSecrets ?? []);
+    if (!sameSecrets(existing, merged)) {
+      if (Object.keys(merged).length === 0) {
+        await this.deps.secretStore.deleteSecrets(input.id);
+      } else {
+        // 暗号化が使えなければここで例外 → プロファイルは永続化されない。
+        await this.deps.secretStore.setSecrets(input.id, merged);
+      }
     }
 
     const stripped = stripSecrets(input);
@@ -112,9 +141,13 @@ export class AppService {
     localPath: string,
     remotePath: string,
     options: { verifyAfterTransfer?: boolean } = {},
+    signal?: AbortSignal,
   ): Promise<CommitResult> {
-    return this.withTransport(id, (transport) =>
-      coreCommitUpload(transport, this.deps.backupManager, id, localPath, remotePath, options),
+    return this.withTransport(
+      id,
+      (transport) =>
+        coreCommitUpload(transport, this.deps.backupManager, id, localPath, remotePath, options),
+      signal,
     );
   }
 
@@ -138,13 +171,31 @@ export class AppService {
     });
   }
 
-  /** ローカルフォルダをリモートディレクトリへ差分同期する（上書きは事前バックアップ）。 */
+  /**
+   * ローカルフォルダをリモートディレクトリへ差分同期する（上書き・削除は事前バックアップ）。
+   * 宛先が空文字やサーバールートのまま実行されるのを main 側でも拒否する
+   * （レンダラを介さないキュー経路にも同じガードを効かせるため）。
+   */
   async commitSync(
     id: string,
     localDir: string,
     remoteDir: string,
     options: SyncFolderOptions = {},
+    signal?: AbortSignal,
   ): Promise<CommitSyncResult> {
+    const check = validateSyncDestination(remoteDir, {
+      deleteExtraneous: options.deleteExtraneous,
+    });
+    if (!check.ok) throw new Error(check.message);
+
+    if (signal?.aborted) {
+      // 接続もプラン算出もせずに中断（キャンセル済みタスクは着手しない）。
+      return {
+        result: { uploaded: 0, createdDirs: 0, skipped: 0, deleted: 0, backups: [], canceled: true },
+        summary: summarizePlan([]),
+      };
+    }
+
     return this.withTransport(id, async (dest) => {
       const computeHash = options.compareBy === 'checksum';
       const source = await this.openLocalSource(localDir);
@@ -160,9 +211,10 @@ export class AppService {
         profileId: id,
         sourceBase: '/',
         destBase: remoteDir,
+        ...(signal ? { signal } : {}),
       });
       return { result, summary: summarizePlan(plan) };
-    });
+    }, signal);
   }
 
   private async openLocalSource(localDir: string): Promise<LocalTransport> {
@@ -194,10 +246,19 @@ export class AppService {
   }
 
   /** リモートファイルをローカルへダウンロードする（上書き前に既存ローカルをバックアップ）。 */
-  async download(id: string, remotePath: string, savePath: string): Promise<DownloadResult> {
+  async download(
+    id: string,
+    remotePath: string,
+    savePath: string,
+    signal?: AbortSignal,
+  ): Promise<DownloadResult> {
+    throwIfAborted(signal);
     const { local, localPath } = await this.openLocalTarget(savePath);
-    return this.withTransport(id, (remote) =>
-      coreCommitDownload(remote, local, this.deps.backupManager, id, remotePath, localPath),
+    return this.withTransport(
+      id,
+      (remote) =>
+        coreCommitDownload(remote, local, this.deps.backupManager, id, remotePath, localPath),
+      signal,
     );
   }
 
@@ -232,16 +293,21 @@ export class AppService {
     return this.deps.backupManager.listBackups(id, remotePath);
   }
 
-  /** バックアップ内容をリモートへ書き戻す（世代を指定しなければ最新）。 */
+  /**
+   * バックアップ内容をリモートへ書き戻す（世代を指定しなければ最新）。
+   * 復元も上書きであるため、書き戻す前に現在のリモート内容をバックアップする
+   * （誤った世代を選んでも直前の状態へ戻せるようにする）。
+   */
   async restoreBackup(
     id: string,
     remotePath: string,
     timestamp?: Date,
-  ): Promise<{ bytesWritten: number }> {
+  ): Promise<RestoreBackupResult> {
     const data = await this.deps.backupManager.restore(id, remotePath, timestamp);
     return this.withTransport(id, async (transport) => {
+      const backupPath = await this.deps.backupManager.backupExisting(transport, id, remotePath);
       await transport.writeFile(remotePath, data);
-      return { bytesWritten: data.length };
+      return { bytesWritten: data.length, backupPath };
     });
   }
 
@@ -290,7 +356,9 @@ export class AppService {
   private async withTransport<T>(
     id: string,
     fn: (transport: RemoteTransport) => Promise<T>,
+    signal?: AbortSignal,
   ): Promise<T> {
+    throwIfAborted(signal);
     const { transport, reconnect } = await this.resolveConnection(id);
     await establishConnection(() => transport.connect(), reconnect);
     try {

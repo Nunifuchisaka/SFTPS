@@ -39,6 +39,14 @@ describe('BackupManager', () => {
     expect(list[0].timestamp.toISOString()).toBe('2026-07-20T01:02:03.004Z');
   });
 
+  it('reports the byte size of each generation (shown in the restore confirmation)', async () => {
+    await transport.writeFile('/f.txt', Buffer.from('12345'));
+    const mgr = new BackupManager({ backupRoot, now: () => new Date('2026-07-20T00:00:00.000Z') });
+    await mgr.backupExisting(transport, 'p', '/f.txt');
+    const list = await mgr.listBackups('p', '/f.txt');
+    expect(list[0].size).toBe(5);
+  });
+
   it('skips backup (returns null) when the remote file does not exist', async () => {
     const mgr = new BackupManager({ backupRoot });
     const saved = await mgr.backupExisting(transport, 'prof1', '/pub/new.html');

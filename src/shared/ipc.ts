@@ -1,4 +1,4 @@
-import type { Profile } from '../core/profile/index';
+import type { Profile, SecretKey } from '../core/profile/index';
 import type { RemoteEntry } from '../core/transport/index';
 import type { UploadPreview, CommitResult } from '../core/upload/index';
 import type { DownloadPreview, DownloadResult } from '../core/download/index';
@@ -11,6 +11,20 @@ import type { Bookmark, BookmarkInput } from '../core/bookmark/index';
 export interface ConnectionResult {
   ok: boolean;
   error?: string;
+}
+
+export interface RestoreBackupResult {
+  bytesWritten: number;
+  /** 復元前に退避した現行リモート内容のバックアップパス。存在しなければ null。 */
+  backupPath: string | null;
+}
+
+export interface SaveProfileOptions {
+  /**
+   * 明示的に削除するシークレット項目。
+   * 空欄は「据え置き」であり削除ではないため、消去はこの明示指定でのみ行う。
+   */
+  clearSecrets?: SecretKey[];
 }
 
 /** キューへ投入する転送リクエスト（kind で判別）。 */
@@ -88,7 +102,7 @@ export const IPC = {
  */
 export interface SftpsApi {
   listProfiles(): Promise<Profile[]>;
-  saveProfile(input: Profile): Promise<Profile>;
+  saveProfile(input: Profile, options?: SaveProfileOptions): Promise<Profile>;
   deleteProfile(id: string): Promise<void>;
   testConnection(id: string): Promise<ConnectionResult>;
   listRemote(id: string, remoteDir: string): Promise<RemoteEntry[]>;
@@ -126,7 +140,7 @@ export interface SftpsApi {
   removeBookmark(id: string): Promise<void>;
   renameBookmark(id: string, name: string): Promise<Bookmark>;
   listBackups(id: string, remotePath: string): Promise<BackupInfo[]>;
-  restoreBackup(id: string, remotePath: string, timestamp?: Date): Promise<{ bytesWritten: number }>;
+  restoreBackup(id: string, remotePath: string, timestamp?: Date): Promise<RestoreBackupResult>;
   isSecretStorageAvailable(): Promise<boolean>;
   listLocal(dir: string): Promise<RemoteEntry[]>;
   homeDir(): Promise<string>;

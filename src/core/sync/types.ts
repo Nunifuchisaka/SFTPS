@@ -17,6 +17,8 @@ export interface SyncAction {
   path: string;
   /** 判定理由（'new' / 'size changed' / 'newer' / 'unchanged' / 'dir exists' / 'missing dir' / 'extraneous'）。 */
   reason: string;
+  /** 対象の実体種別。delete-extra で「ファイルのみバックアップする」判定に使う。 */
+  entryType?: 'file' | 'dir';
 }
 
 /** 変更判定の基準。checksum は最も厳密だが両側の内容を読むためコストが高い。 */

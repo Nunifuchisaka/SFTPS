@@ -169,6 +169,31 @@ export function resolveSecretUpdate(
   return { action: 'keep' };
 }
 
+/** シークレットフィールド名。 */
+export type SecretKey = (typeof SECRET_KEYS)[number];
+
+/**
+ * 既存シークレットと入力シークレットを項目ごとにマージする純粋関数。
+ * 判定は resolveSecretUpdate に委ね、keep=既存据え置き / update=上書き / clear=削除。
+ * clearKeys に含まれる項目は入力値があっても空欄扱いとし、明示クリアを優先する。
+ */
+export function mergeSecrets(
+  existing: Record<string, string>,
+  incoming: Record<string, string>,
+  clearKeys: readonly string[] = [],
+): Record<string, string> {
+  const merged: Record<string, string> = {};
+  for (const key of SECRET_KEYS) {
+    const explicitClear = clearKeys.includes(key);
+    const formValue = explicitClear ? '' : (incoming[key] ?? '');
+    const existingValue = existing[key];
+    const { action } = resolveSecretUpdate(formValue, existingValue !== undefined, explicitClear);
+    if (action === 'update') merged[key] = formValue;
+    else if (action === 'keep' && existingValue !== undefined) merged[key] = existingValue;
+  }
+  return merged;
+}
+
 /** プロファイルからシークレットフィールドのみを抽出する（値が設定されているもののみ）。 */
 export function extractSecrets(profile: Profile): Record<string, string> {
   const source = profile as unknown as Record<string, unknown>;

@@ -1,6 +1,9 @@
-import type { Profile, Protocol } from '../core/profile/index';
+import type { Profile, Protocol, SecretKey } from '../core/profile/index';
 import type { RemoteEntry } from '../core/transport/index';
 import type { BackupInfo } from '../core/backup/index';
+// ガード関数は純粋モジュールから直接読む（BackupManager 等の node:fs 依存をレンダラへ持ち込まないため）。
+import { confirmRestore } from '../core/backup/restore-guard';
+import { confirmMirrorDeletion, validateSyncDestination } from '../core/sync/guard';
 import type { CompareBy } from '../core/sync/index';
 import {
   filterEntries,
@@ -20,13 +23,19 @@ import { createBookmarkView } from './bookmark-view';
 import { createTranslator, dictionaries, resolveLocale, LOCALES } from '../core/i18n/index';
 import { normalizeThemeSetting, THEME_SETTINGS, type ThemeSetting } from '../core/theme/index';
 import { applyTheme } from './theme';
-import type { QueueStatus, SyncFolderOptions } from '../shared/ipc';
+import type {
+  PrepareSyncResult,
+  QueueStatus,
+  SaveProfileOptions,
+  SyncFolderOptions,
+} from '../shared/ipc';
 import { createDiffView, diffOrientationLabels } from './diff-view';
 import { createSyncPlanView } from './sync-view';
 import { buildUploadRequests, buildRequestsFromDropTargets } from './bulk-transfer';
 import { attachDropZone } from './dnd';
 import {
   buildProfileFromForm,
+  buildClearSecretsFromForm,
   profileToFormValues,
   emptyFormValues,
   type FormValues,
@@ -261,11 +270,23 @@ export function mountApp(root: string | HTMLElement): void {
       ['strict', 'ホスト鍵: strict（既知のみ）'],
     ]);
     const keyIn = textarea('', editing ? '秘密鍵（変更時のみ入力）' : '秘密鍵（PEM）');
-    const passphraseIn = input('', 'パスフレーズ', 'password');
+    const passphraseIn = input('', editing ? 'パスフレーズ（変更時のみ入力）' : 'パスフレーズ', 'password');
     const regionIn = input(fv.region, 'リージョン');
     const bucketIn = input(fv.bucket, 'バケット');
     const akidIn = input(fv.accessKeyId, 'Access Key ID');
     const secretIn = input('', editing ? 'Secret Access Key（変更時のみ）' : 'Secret Access Key', 'password');
+
+    // 空欄は「据え置き」。保存済みシークレットを消すのはこの明示チェックのみ（編集時のみ表示）。
+    const clearChecks = new Map<SecretKey, HTMLInputElement>();
+    function secretField(key: SecretKey, control: HTMLElement, label: string): HTMLElement {
+      if (!editing) return control;
+      const chk = h('input', { type: 'checkbox' }) as HTMLInputElement;
+      clearChecks.set(key, chk);
+      return h('div', { class: 'form_1__secret' }, [
+        control,
+        h('label', { class: 'form_1__clear' }, [chk, ` 保存済みの${label}を削除`]),
+      ]);
+    }
     const timeoutIn = input(fv.connectTimeoutMs, '接続タイムアウト(ms)', 'number');
     const reconnectIn = h('input', { type: 'checkbox' }) as HTMLInputElement;
     reconnectIn.checked = fv.autoReconnect;
@@ -278,13 +299,33 @@ export function mountApp(root: string | HTMLElement): void {
 
     function rebuildFields(): void {
       fields.replaceChildren(idIn, nameIn);
+      clearChecks.clear();
       const proto2 = proto.value as Protocol;
       if (proto2 === 'ftp') {
-        fields.append(hostIn, portIn, userIn, passIn, h('label', {}, ['TLS: ', ftpSecIn]));
+        fields.append(
+          hostIn,
+          portIn,
+          userIn,
+          secretField('password', passIn, 'パスワード'),
+          h('label', {}, ['TLS: ', ftpSecIn]),
+        );
       } else if (proto2 === 'sftp') {
-        fields.append(hostIn, portIn, userIn, passIn, keyIn, passphraseIn, h('label', {}, ['鍵検証: ', hostKeyIn]));
+        fields.append(
+          hostIn,
+          portIn,
+          userIn,
+          secretField('password', passIn, 'パスワード'),
+          secretField('privateKey', keyIn, '秘密鍵'),
+          secretField('passphrase', passphraseIn, 'パスフレーズ'),
+          h('label', {}, ['鍵検証: ', hostKeyIn]),
+        );
       } else {
-        fields.append(regionIn, bucketIn, akidIn, secretIn);
+        fields.append(
+          regionIn,
+          bucketIn,
+          akidIn,
+          secretField('secretAccessKey', secretIn, 'Secret Access Key'),
+        );
       }
       fields.append(commonFields());
     }
@@ -325,8 +366,11 @@ export function mountApp(root: string | HTMLElement): void {
         secretAccessKey: secretIn.value,
         connectTimeoutMs: timeoutIn.value.trim(),
         autoReconnect: reconnectIn.checked,
+        clearSecrets: [...clearChecks].filter(([, chk]) => chk.checked).map(([key]) => key),
       };
-      void saveProfile(buildProfileFromForm(values));
+      void saveProfile(buildProfileFromForm(values), {
+        clearSecrets: buildClearSecretsFromForm(values),
+      });
     });
 
     form.append(
@@ -338,8 +382,15 @@ export function mountApp(root: string | HTMLElement): void {
     return form;
   }
 
-  async function saveProfile(p: Profile): Promise<void> {
-    const r = await guard('プロファイル保存', () => api.saveProfile(p));
+  async function saveProfile(p: Profile, options: SaveProfileOptions): Promise<void> {
+    if (options.clearSecrets && options.clearSecrets.length > 0) {
+      const ok = window.confirm(
+        `保存済みシークレット ${options.clearSecrets.length} 件（${options.clearSecrets.join(', ')}）を削除します。` +
+          '削除したシークレットは復元できません。よろしいですか？',
+      );
+      if (!ok) return;
+    }
+    const r = await guard('プロファイル保存', () => api.saveProfile(p, options));
     if (r) {
       state.editing = null;
       await refreshProfiles();
@@ -947,10 +998,10 @@ export function mountApp(root: string | HTMLElement): void {
       const ts = new Date(b.timestamp);
       list.append(
         h('li', { class: 'list_1__item' }, [
-          h('span', { class: 'list_1__label' }, [ts.toLocaleString()]),
+          h('span', { class: 'list_1__label' }, [`${ts.toLocaleString()}（${b.size}B）`]),
           h(
             'button',
-            { class: 'btn_1', onclick: () => void restoreBackup(remotePath, ts) },
+            { class: 'btn_1', onclick: () => void restoreBackup(remotePath, ts, b.size) },
             ['復元'],
           ),
         ]),
@@ -959,14 +1010,21 @@ export function mountApp(root: string | HTMLElement): void {
     backupPanel.append(list);
   }
 
-  async function restoreBackup(remotePath: string, timestamp: Date): Promise<void> {
+  async function restoreBackup(remotePath: string, timestamp: Date, size: number): Promise<void> {
     if (!state.currentProfileId) return;
+    // 復元も上書き。世代日時とサイズを提示して確認を取る。
+    const check = confirmRestore(remotePath, { timestamp, size });
+    if (check.requiresConfirm && !window.confirm(check.message)) return;
     const r = await guard('復元', () =>
       api.restoreBackup(state.currentProfileId as string, remotePath, timestamp),
     );
     if (r) {
-      setStatus(`復元完了: ${r.bytesWritten}B をリモートへ書き戻し`);
+      setStatus(
+        `復元完了: ${r.bytesWritten}B をリモートへ書き戻し` +
+          (r.backupPath ? ` / 復元前バックアップ: ${r.backupPath}` : ' / 復元前バックアップなし（新規）'),
+      );
       await loadRemote(state.remoteDir);
+      await loadBackups(remotePath);
     }
   }
 
@@ -1005,7 +1063,7 @@ export function mountApp(root: string | HTMLElement): void {
       h(
         'button',
         { class: 'btn_1 btn_1--primary', onclick: () => void runSyncNow(remoteIn.value.trim(), opts()) },
-        ['同期実行'],
+        ['同期実行（プラン確認あり）'],
       ),
       h('button', { class: 'btn_1', onclick: () => void enqueueSync(remoteIn.value.trim(), opts()) }, [
         'キューで同期',
@@ -1022,16 +1080,62 @@ export function mountApp(root: string | HTMLElement): void {
     }
   }
 
-  async function planSyncNow(remoteDir: string, options: SyncFolderOptions): Promise<void> {
+  /** 同期先の妥当性を確認する。error は中止、warn は確認を取る。 */
+  function checkSyncDestination(remoteDir: string, options: SyncFolderOptions): boolean {
+    const check = validateSyncDestination(remoteDir, {
+      deleteExtraneous: options.deleteExtraneous,
+    });
+    if (!check.ok) {
+      setStatus(check.message, true);
+      return false;
+    }
+    if (check.level === 'warn' && !window.confirm(check.message)) return false;
+    return true;
+  }
+
+  async function planSyncNow(
+    remoteDir: string,
+    options: SyncFolderOptions,
+  ): Promise<PrepareSyncResult | undefined> {
     if (!state.currentProfileId || !state.syncLocalDir) {
       setStatus('プロファイルとローカルフォルダが必要です', true);
-      return;
+      return undefined;
     }
     const r = await guard('同期プラン作成', () =>
       api.prepareSync(state.currentProfileId as string, state.syncLocalDir as string, remoteDir, options),
     );
     syncPlanPanel.replaceChildren();
     if (r) syncPlanPanel.append(createSyncPlanView(r.plan, r.summary));
+    return r;
+  }
+
+  /**
+   * 実行前に必ずプランを作成・表示し、内容を確認させてから同期する。
+   * ミラー削除が含まれる場合は削除件数と対象を提示する強い確認を必須にする。
+   */
+  async function confirmSyncPlan(
+    remoteDir: string,
+    options: SyncFolderOptions,
+  ): Promise<boolean> {
+    if (!checkSyncDestination(remoteDir, options)) return false;
+    const prepared = await planSyncNow(remoteDir, options);
+    if (!prepared) return false;
+
+    const deletion = confirmMirrorDeletion(prepared.plan, remoteDir);
+    if (deletion.requiresConfirm) {
+      if (!window.confirm(deletion.message)) {
+        setStatus('同期を中止しました');
+        return false;
+      }
+      return true;
+    }
+
+    const s = prepared.summary;
+    const ok = window.confirm(
+      `「${remoteDir}」へ同期します（アップロード ${s.upload} / 新規dir ${s.createDir} / スキップ ${s.skip}）。実行してよろしいですか？`,
+    );
+    if (!ok) setStatus('同期を中止しました');
+    return ok;
   }
 
   async function runSyncNow(remoteDir: string, options: SyncFolderOptions): Promise<void> {
@@ -1039,13 +1143,15 @@ export function mountApp(root: string | HTMLElement): void {
       setStatus('プロファイルとローカルフォルダが必要です', true);
       return;
     }
+    if (!(await confirmSyncPlan(remoteDir, options))) return;
+
     const r = await guard('同期実行', () =>
       api.commitSync(state.currentProfileId as string, state.syncLocalDir as string, remoteDir, options),
     );
     if (r) {
       const s = r.result;
       setStatus(
-        `同期完了: up ${s.uploaded} / dir ${s.createdDirs} / skip ${s.skipped} / del ${s.deleted}`,
+        `同期${s.canceled ? '中断' : '完了'}: up ${s.uploaded} / dir ${s.createdDirs} / skip ${s.skipped} / del ${s.deleted}`,
       );
       await loadRemote(state.remoteDir);
     }
@@ -1073,6 +1179,8 @@ export function mountApp(root: string | HTMLElement): void {
       setStatus('プロファイルとローカルフォルダが必要です', true);
       return;
     }
+    // キュー経由でも同じプレビュー＋確認を通す（無確認のミラー削除を作らない）。
+    if (!(await confirmSyncPlan(remoteDir, options))) return;
     await api.enqueueTransfer({
       kind: 'sync',
       profileId: state.currentProfileId,
@@ -1121,6 +1229,9 @@ export function mountApp(root: string | HTMLElement): void {
         },
         ['全キャンセル'],
       ),
+      h('div', { class: 'queue_1__hint' }, [
+        '未着手タスクは即時キャンセルされます。実行中の同期は次のファイルへ進まずに停止しますが、書き込み中のファイル 1 件は完了します。',
+      ]),
     );
   }
 

@@ -91,7 +91,24 @@ describe('planSync delete-extra', () => {
 
   it('includes delete-extra when deleteExtraneous is enabled', () => {
     const plan = planSync(source, dest, { deleteExtraneous: true });
-    expect(plan).toContainEqual({ type: 'delete-extra', path: 'old.txt', reason: 'extraneous' });
+    expect(plan).toContainEqual({
+      type: 'delete-extra',
+      path: 'old.txt',
+      reason: 'extraneous',
+      entryType: 'file',
+    });
+  });
+
+  it('records the dest entry type so the runner can back up files before deleting', () => {
+    const plan = planSync([], [{ path: 'old', type: 'dir', size: 0, modifiedAt: null }], {
+      deleteExtraneous: true,
+    });
+    expect(plan).toContainEqual({
+      type: 'delete-extra',
+      path: 'old',
+      reason: 'extraneous',
+      entryType: 'dir',
+    });
   });
 });
 

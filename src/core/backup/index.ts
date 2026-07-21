@@ -1,6 +1,8 @@
-import { mkdir, readdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { RemoteTransport } from '../transport/types';
+
+export { confirmRestore, type RestoreConfirm } from './restore-guard';
 
 export interface BackupManagerOptions {
   /** バックアップ保存先のルートディレクトリ。 */
@@ -15,6 +17,8 @@ export interface BackupInfo {
   timestamp: Date;
   /** バックアップファイルの絶対パス。 */
   path: string;
+  /** バックアップファイルのバイト数（復元確認で世代と併せて提示する）。 */
+  size: number;
 }
 
 const DEFAULT_MAX_GENERATIONS = 20;
@@ -91,7 +95,7 @@ export class BackupManager {
     const dir = this.dirFor(profileId, remotePath);
     const generations = await this.readGenerations(dir);
     return generations
-      .map((g) => ({ timestamp: g.timestamp, path: path.join(dir, g.file) }))
+      .map((g) => ({ timestamp: g.timestamp, path: path.join(dir, g.file), size: g.size }))
       .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
   }
 
@@ -125,18 +129,21 @@ export class BackupManager {
 
   private async readGenerations(
     dir: string,
-  ): Promise<Array<{ file: string; stem: string; timestamp: Date }>> {
+  ): Promise<Array<{ file: string; stem: string; timestamp: Date; size: number }>> {
     let files: string[];
     try {
       files = await readdir(dir);
     } catch {
       return [];
     }
-    const result: Array<{ file: string; stem: string; timestamp: Date }> = [];
+    const result: Array<{ file: string; stem: string; timestamp: Date; size: number }> = [];
     for (const file of files) {
       const stem = path.basename(file, path.extname(file));
       const ts = parseStamp(stem);
-      if (ts) result.push({ file, stem, timestamp: ts });
+      if (ts) {
+        const st = await stat(path.join(dir, file));
+        result.push({ file, stem, timestamp: ts, size: st.size });
+      }
     }
     return result;
   }

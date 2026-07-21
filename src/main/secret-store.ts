@@ -42,6 +42,11 @@ export class SecretStore {
     return this.safeStorage.isEncryptionAvailable();
   }
 
+  /**
+   * プロファイルのシークレットレコードを **全置換** する低レベル操作。
+   * ここに渡さなかった項目は失われるため、フォーム保存など部分更新の経路では
+   * 呼び出し側で `mergeSecrets`（core/profile）により既存値とマージしてから渡すこと。
+   */
   async setSecrets(profileId: string, secrets: Record<string, string>): Promise<void> {
     if (!this.safeStorage.isEncryptionAvailable()) {
       throw new SecretEncryptionUnavailableError();

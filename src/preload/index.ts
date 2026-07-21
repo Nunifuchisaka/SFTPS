@@ -3,7 +3,7 @@ import { IPC, type SftpsApi } from '../shared/ipc';
 
 const api: SftpsApi = {
   listProfiles: () => ipcRenderer.invoke(IPC.listProfiles),
-  saveProfile: (input) => ipcRenderer.invoke(IPC.saveProfile, input),
+  saveProfile: (input, options) => ipcRenderer.invoke(IPC.saveProfile, input, options),
   deleteProfile: (id) => ipcRenderer.invoke(IPC.deleteProfile, id),
   testConnection: (id) => ipcRenderer.invoke(IPC.testConnection, id),
   listRemote: (id, remoteDir) => ipcRenderer.invoke(IPC.listRemote, id, remoteDir),

@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, rm, readFile, writeFile, mkdir } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LocalTransport } from '../core/transport/index';
 import { BackupManager } from '../core/backup/index';
-import type { FtpProfile } from '../core/profile/index';
+import type { FtpProfile, SftpProfile } from '../core/profile/index';
 import { SecretStore, type SafeStorageLike } from './secret-store';
 import { ProfileStore } from './profile-store';
 import { BookmarkFile } from './bookmark-store';
@@ -32,6 +33,18 @@ const ftpProfile: FtpProfile = {
   port: 21,
   user: 'alice',
   password: 'hunter2',
+};
+
+const sftpProfile: SftpProfile = {
+  id: 's1',
+  name: 'My SFTP',
+  protocol: 'sftp',
+  host: 'sftp.example.com',
+  port: 22,
+  user: 'bob',
+  password: 'pw',
+  privateKey: 'KEYDATA',
+  passphrase: 'phrase',
 };
 
 async function writeLocal(path: string, data: Buffer): Promise<void> {
@@ -111,6 +124,56 @@ describe('AppService', () => {
     expect(await service.listProfiles()).toHaveLength(1);
   });
 
+  it('saveProfile keeps stored secrets that are left blank on re-save', async () => {
+    await service.saveProfile(sftpProfile);
+    // パスフレーズだけ入れ直した保存（他のシークレット欄は空欄）
+    await service.saveProfile({ ...sftpProfile, privateKey: undefined, password: undefined, passphrase: 'newphrase' });
+
+    const store = new SecretStore({ safeStorage: safe, filePath: secretFile });
+    expect(await store.getSecrets('s1')).toEqual({
+      password: 'pw',
+      privateKey: 'KEYDATA',
+      passphrase: 'newphrase',
+    });
+  });
+
+  it('saveProfile with every secret field blank keeps all stored secrets', async () => {
+    await service.saveProfile(sftpProfile);
+    await service.saveProfile({
+      ...sftpProfile,
+      password: undefined,
+      privateKey: undefined,
+      passphrase: undefined,
+    });
+
+    const store = new SecretStore({ safeStorage: safe, filePath: secretFile });
+    expect(await store.getSecrets('s1')).toEqual({
+      password: 'pw',
+      privateKey: 'KEYDATA',
+      passphrase: 'phrase',
+    });
+  });
+
+  it('saveProfile removes only the explicitly cleared secret', async () => {
+    await service.saveProfile(sftpProfile);
+    await service.saveProfile(
+      { ...sftpProfile, password: undefined, privateKey: undefined, passphrase: undefined },
+      { clearSecrets: ['privateKey'] },
+    );
+
+    const store = new SecretStore({ safeStorage: safe, filePath: secretFile });
+    expect(await store.getSecrets('s1')).toEqual({ password: 'pw', passphrase: 'phrase' });
+  });
+
+  it('saveProfile never touches another profile\'s secrets', async () => {
+    await service.saveProfile(ftpProfile);
+    await service.saveProfile(sftpProfile);
+    await service.saveProfile({ ...sftpProfile, password: undefined, privateKey: undefined, passphrase: 'x' });
+
+    const store = new SecretStore({ safeStorage: safe, filePath: secretFile });
+    expect(await store.getSecrets('p1')).toEqual({ password: 'hunter2' });
+  });
+
   it('deleteProfile removes both the profile and its secret', async () => {
     await service.saveProfile(ftpProfile);
     await service.deleteProfile('p1');
@@ -146,6 +209,25 @@ describe('AppService', () => {
     expect((await transport.readFile('/f.txt')).toString('utf8')).toBe('OLD');
   });
 
+  it('restoreBackup backs up the current remote content before overwriting it', async () => {
+    await service.saveProfile(ftpProfile);
+    await transport.connect();
+    await transport.writeFile('/f.txt', Buffer.from('GEN1', 'utf8'));
+    const localPath = join(localDir, 'f.txt');
+    await writeLocal(localPath, Buffer.from('GEN2', 'utf8'));
+    await service.commitUpload('p1', localPath, '/f.txt'); // GEN1 をバックアップして GEN2 へ
+
+    const restored = await service.restoreBackup('p1', '/f.txt');
+    expect(restored.backupPath).not.toBeNull();
+    expect((await readFile(restored.backupPath as string, 'utf8'))).toBe('GEN2');
+    expect((await transport.readFile('/f.txt')).toString('utf8')).toBe('GEN1');
+
+    // 直前の状態（GEN2）へ戻せる世代が残っている
+    const generations = await service.listBackups('p1', '/f.txt');
+    expect(generations.map((g) => g.size)).toContain(4);
+    expect(generations).toHaveLength(2);
+  });
+
   it('prepareSync plans without writing; commitSync applies with backups', async () => {
     await service.saveProfile(ftpProfile);
     const localDir = join(dir, 'localsrc');
@@ -168,6 +250,98 @@ describe('AppService', () => {
     const backups = await service.listBackups('p1', '/site/a.txt');
     expect(backups).toHaveLength(1);
     expect((await service.restoreBackup('p1', '/site/a.txt')).bytesWritten).toBe(3);
+  });
+
+  it('commitSync refuses an empty remote directory (it would resolve to the server root)', async () => {
+    await service.saveProfile(ftpProfile);
+    const srcDir = join(dir, 'emptydest');
+    await writeLocal(join(srcDir, 'a.txt'), Buffer.from('a'));
+    await expect(service.commitSync('p1', srcDir, '', { compareBy: 'size' })).rejects.toThrow();
+  });
+
+  it('commitSync refuses the server root while mirror deletion is enabled', async () => {
+    await service.saveProfile(ftpProfile);
+    const srcDir = join(dir, 'rootdest');
+    await writeLocal(join(srcDir, 'a.txt'), Buffer.from('a'));
+    await transport.connect();
+    await transport.writeFile('/precious.txt', Buffer.from('KEEPME'));
+
+    await expect(
+      service.commitSync('p1', srcDir, '/', { compareBy: 'size', deleteExtraneous: true }),
+    ).rejects.toThrow();
+    expect((await transport.readFile('/precious.txt')).toString()).toBe('KEEPME');
+  });
+
+  it('commitSync still allows the server root when mirror deletion is off', async () => {
+    await service.saveProfile(ftpProfile);
+    const srcDir = join(dir, 'rootok');
+    await writeLocal(join(srcDir, 'a.txt'), Buffer.from('a'));
+    const r = await service.commitSync('p1', srcDir, '/', { compareBy: 'size' });
+    expect(r.result.uploaded).toBe(1);
+  });
+
+  it('commitSync backs up extraneous remote files before mirror-deleting them', async () => {
+    await service.saveProfile(ftpProfile);
+    const srcDir = join(dir, 'mirror');
+    await writeLocal(join(srcDir, 'a.txt'), Buffer.from('a'));
+    await transport.connect();
+    await transport.writeFile('/site/gone.txt', Buffer.from('LOST'));
+
+    const r = await service.commitSync('p1', srcDir, '/site', {
+      compareBy: 'size',
+      deleteExtraneous: true,
+    });
+    expect(r.result.deleted).toBe(1);
+    expect(await transport.exists('/site/gone.txt')).toBe(false);
+    expect((await service.restoreBackup('p1', '/site/gone.txt')).bytesWritten).toBe(4);
+  });
+
+  it('commitUpload does not touch the remote when the signal is already aborted', async () => {
+    await service.saveProfile(ftpProfile);
+    await transport.connect();
+    await transport.writeFile('/keep.txt', Buffer.from('OLD'));
+    const localPath = join(localDir, 'keep.txt');
+    await writeLocal(localPath, Buffer.from('NEW'));
+
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      service.commitUpload('p1', localPath, '/keep.txt', {}, controller.signal),
+    ).rejects.toThrow(/cancel/i);
+    expect((await transport.readFile('/keep.txt')).toString()).toBe('OLD');
+  });
+
+  it('download does not write locally when the signal is already aborted', async () => {
+    await service.saveProfile(ftpProfile);
+    await transport.connect();
+    await transport.writeFile('/d2.txt', Buffer.from('payload'));
+    const savePath = join(localDir, 'd2.txt');
+
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      service.download('p1', '/d2.txt', savePath, controller.signal),
+    ).rejects.toThrow(/cancel/i);
+    expect(existsSync(savePath)).toBe(false);
+  });
+
+  it('commitSync stops without transferring when the signal is already aborted', async () => {
+    await service.saveProfile(ftpProfile);
+    const srcDir = join(dir, 'cancelsync');
+    await writeLocal(join(srcDir, 'a.txt'), Buffer.from('a'));
+
+    const controller = new AbortController();
+    controller.abort();
+    const r = await service.commitSync(
+      'p1',
+      srcDir,
+      '/canceled',
+      { compareBy: 'size' },
+      controller.signal,
+    );
+    expect(r.result.canceled).toBe(true);
+    expect(r.result.uploaded).toBe(0);
+    expect(await transport.exists('/canceled/a.txt')).toBe(false);
   });
 
   it('renameRemote moves a remote file', async () => {
