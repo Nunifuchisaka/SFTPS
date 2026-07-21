@@ -13,3 +13,4 @@ export * from './history/index';
 export * from './checksum/index';
 export * from './i18n/index';
 export * from './theme/index';
+export * from './reconnect/index';

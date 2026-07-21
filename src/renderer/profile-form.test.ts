@@ -50,6 +50,11 @@ describe('round-trip: profile -> form -> profile (non-secret fields preserved)',
   it('s3', () => {
     expect(buildProfileFromForm(profileToFormValues(s3))).toEqual(stripSecrets(s3));
   });
+
+  it('preserves connectTimeoutMs and autoReconnect', () => {
+    const p: FtpProfile = { ...ftp, connectTimeoutMs: 15000, autoReconnect: true };
+    expect(buildProfileFromForm(profileToFormValues(p))).toEqual(stripSecrets(p));
+  });
 });
 
 describe('buildProfileFromForm secret handling', () => {

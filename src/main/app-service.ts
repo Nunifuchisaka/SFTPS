@@ -2,6 +2,7 @@ import path from 'node:path';
 import { LocalTransport, type RemoteEntry, type RemoteTransport } from '../core/transport/index';
 import type { BackupInfo, BackupManager } from '../core/backup/index';
 import { walkTree, planSync, summarizePlan, runSync, type SyncEntry } from '../core/sync/index';
+import { establishConnection, type ReconnectOptions } from '../core/reconnect/index';
 import {
   extractSecrets,
   stripSecrets,
@@ -236,20 +237,27 @@ export class AppService {
     });
   }
 
-  private async resolveTransport(id: string): Promise<RemoteTransport> {
+  private async resolveConnection(
+    id: string,
+  ): Promise<{ transport: RemoteTransport; reconnect: ReconnectOptions }> {
     const profiles = await this.deps.profileStore.list();
     const profile = profiles.find((p) => p.id === id);
     if (!profile) throw new Error(`profile not found: ${id}`);
     const secrets = (await this.deps.secretStore.getSecrets(id)) ?? {};
-    return this.deps.createTransport(profile, secrets);
+    const transport = this.deps.createTransport(profile, secrets);
+    // autoReconnect 有効時は多段バックオフ、無効時は単発（初回失敗で即例外＝従来挙動）。
+    const reconnect: ReconnectOptions = profile.autoReconnect
+      ? { maxAttempts: 4, baseDelayMs: 1000, factor: 2, maxDelayMs: 30_000 }
+      : { maxAttempts: 1, baseDelayMs: 1, factor: 2, maxDelayMs: 1 };
+    return { transport, reconnect };
   }
 
   private async withTransport<T>(
     id: string,
     fn: (transport: RemoteTransport) => Promise<T>,
   ): Promise<T> {
-    const transport = await this.resolveTransport(id);
-    await transport.connect();
+    const { transport, reconnect } = await this.resolveConnection(id);
+    await establishConnection(() => transport.connect(), reconnect);
     try {
       return await fn(transport);
     } finally {

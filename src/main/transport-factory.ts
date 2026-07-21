@@ -29,6 +29,10 @@ export interface S3ClientConfig {
     secretAccessKey: string;
     sessionToken?: string;
   };
+  requestHandler?: {
+    connectionTimeout: number;
+    requestTimeout: number;
+  };
 }
 
 /** プロトコルごとの実クライアント生成を差し替え可能にするための依存注入口。 */
@@ -54,13 +58,22 @@ function toBasicFtpSecure(mode: FtpSecurity): boolean | 'implicit' {
 
 /** basic-ftp の access() へ渡す接続オプションを組み立てる。 */
 export function buildFtpAccessOptions(profile: FtpProfile, secrets: Secrets) {
-  return {
+  const options: {
+    host: string;
+    port: number;
+    user: string;
+    password: string;
+    secure: boolean | 'implicit';
+    timeout?: number;
+  } = {
     host: profile.host,
     port: profile.port,
     user: profile.user,
     password: secrets.password ?? '',
     secure: toBasicFtpSecure(resolveFtpSecurity(profile)),
   };
+  if (profile.connectTimeoutMs !== undefined) options.timeout = profile.connectTimeoutMs;
+  return options;
 }
 
 /** ssh2-sftp-client の connect() へ渡す設定を組み立てる。 */
@@ -78,6 +91,7 @@ export function buildSftpConnectConfig(
   if (secrets.privateKey) config.privateKey = secrets.privateKey;
   if (secrets.passphrase) config.passphrase = secrets.passphrase;
   if (hostVerifier) config.hostVerifier = hostVerifier;
+  if (profile.connectTimeoutMs !== undefined) config.readyTimeout = profile.connectTimeoutMs;
   return config;
 }
 
@@ -92,6 +106,12 @@ export function buildS3ClientConfig(profile: S3Profile, secrets: Secrets): S3Cli
     if (secrets.sessionToken) {
       config.credentials.sessionToken = secrets.sessionToken;
     }
+  }
+  if (profile.connectTimeoutMs !== undefined) {
+    config.requestHandler = {
+      connectionTimeout: profile.connectTimeoutMs,
+      requestTimeout: profile.connectTimeoutMs,
+    };
   }
   return config;
 }

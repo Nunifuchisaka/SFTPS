@@ -14,6 +14,10 @@ export interface FtpProfile {
   ftpSecurity?: FtpSecurity;
   /** @deprecated ftpSecurity へ移行。true=explicit 相当の後方互換フラグ。 */
   secure?: boolean;
+  /** 接続タイムアウト（ミリ秒）。 */
+  connectTimeoutMs?: number;
+  /** 切断検知時に自動再接続を試みるか。 */
+  autoReconnect?: boolean;
   /** シークレット（JSON へは保存しない）。 */
   password?: string;
 }
@@ -27,6 +31,10 @@ export interface SftpProfile {
   user: string;
   /** ホスト鍵検証ポリシー。tofu=初回信頼して記録 / strict=既知の鍵のみ受理。既定 tofu。 */
   hostKeyPolicy?: 'tofu' | 'strict';
+  /** 接続タイムアウト（ミリ秒）。 */
+  connectTimeoutMs?: number;
+  /** 切断検知時に自動再接続を試みるか。 */
+  autoReconnect?: boolean;
   /** シークレット（JSON へは保存しない）。 */
   password?: string;
   /** シークレット（JSON へは保存しない）。 */
@@ -43,6 +51,10 @@ export interface S3Profile {
   bucket: string;
   /** 識別子。ユーザー名相当のため保存する。 */
   accessKeyId?: string;
+  /** 接続タイムアウト（ミリ秒）。 */
+  connectTimeoutMs?: number;
+  /** 切断検知時に自動再接続を試みるか。 */
+  autoReconnect?: boolean;
   /** シークレット（JSON へは保存しない）。 */
   secretAccessKey?: string;
   /** シークレット（JSON へは保存しない）。 */
@@ -119,6 +131,16 @@ export function validateProfile(profile: Profile): string[] {
       }
       break;
   }
+
+  if (
+    profile.connectTimeoutMs !== undefined &&
+    (!Number.isInteger(profile.connectTimeoutMs) ||
+      profile.connectTimeoutMs <= 0 ||
+      profile.connectTimeoutMs > 600_000)
+  ) {
+    errors.push('connectTimeoutMs must be a positive integer up to 600000');
+  }
+
   return errors;
 }
 

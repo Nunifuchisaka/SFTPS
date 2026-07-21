@@ -80,6 +80,19 @@ describe('validateProfile', () => {
     expect(validateProfile(bad).some((e) => /ftpSecurity/.test(e))).toBe(true);
   });
 
+  it('accepts a connectTimeoutMs within range', () => {
+    expect(validateProfile({ ...validFtp, connectTimeoutMs: 15000 })).toEqual([]);
+  });
+
+  it('rejects non-positive, non-integer or too-large connectTimeoutMs', () => {
+    const bad = (v: number): boolean =>
+      validateProfile({ ...validFtp, connectTimeoutMs: v }).some((e) => /connectTimeoutMs/.test(e));
+    expect(bad(0)).toBe(true);
+    expect(bad(-5)).toBe(true);
+    expect(bad(1.5)).toBe(true);
+    expect(bad(999_999_999)).toBe(true);
+  });
+
   it('rejects invalid S3 bucket names', () => {
     expect(validateProfile({ ...validS3, bucket: 'Ab' }).length).toBeGreaterThan(0); // 大文字・短すぎ
     expect(validateProfile({ ...validS3, bucket: 'has..dots' }).length).toBeGreaterThan(0); // 連続ドット

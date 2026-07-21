@@ -51,6 +51,20 @@ describe('config builders', () => {
     expect(cfg).toEqual({ host: 'h', port: 22, username: 'u', privateKey: 'KEY', passphrase: 'pp' });
   });
 
+  it('maps connectTimeoutMs to each library option', () => {
+    expect(buildFtpAccessOptions({ ...ftpProfile, connectTimeoutMs: 12000 }, {}).timeout).toBe(12000);
+    const sftpCfg = buildSftpConnectConfig({ ...sftpProfile, connectTimeoutMs: 12000 }, {}) as Record<string, unknown>;
+    expect(sftpCfg.readyTimeout).toBe(12000);
+    const s3Cfg = buildS3ClientConfig({ ...s3Profile, connectTimeoutMs: 12000 }, {});
+    expect(s3Cfg.requestHandler).toEqual({ connectionTimeout: 12000, requestTimeout: 12000 });
+  });
+
+  it('omits timeout options when connectTimeoutMs is unset', () => {
+    expect('timeout' in buildFtpAccessOptions(ftpProfile, {})).toBe(false);
+    expect('readyTimeout' in buildSftpConnectConfig(sftpProfile, {})).toBe(false);
+    expect(buildS3ClientConfig(s3Profile, {}).requestHandler).toBeUndefined();
+  });
+
   it('buildSftpConnectConfig includes hostVerifier when provided, and omits it otherwise', () => {
     const hv: HostVerifierFn = (_key, cb) => cb(true);
     const withHv = buildSftpConnectConfig(sftpProfile, { password: 'pw' }, hv);

@@ -22,6 +22,9 @@ export interface FormValues {
   bucket: string;
   accessKeyId: string;
   secretAccessKey: string;
+  /** 接続タイムアウト（ミリ秒）。空文字＝未設定。 */
+  connectTimeoutMs: string;
+  autoReconnect: boolean;
 }
 
 /** 新規作成用の既定フォーム値（安全側の既定: ftpSecurity=explicit, hostKeyPolicy=tofu）。 */
@@ -42,6 +45,8 @@ export function emptyFormValues(): FormValues {
     bucket: '',
     accessKeyId: '',
     secretAccessKey: '',
+    connectTimeoutMs: '',
+    autoReconnect: false,
   };
 }
 
@@ -54,6 +59,8 @@ export function profileToFormValues(profile: Profile): FormValues {
   fv.protocol = profile.protocol;
   fv.id = profile.id;
   fv.name = profile.name;
+  if (profile.connectTimeoutMs !== undefined) fv.connectTimeoutMs = String(profile.connectTimeoutMs);
+  fv.autoReconnect = profile.autoReconnect ?? false;
 
   if (profile.protocol === 'ftp') {
     fv.host = profile.host;
@@ -78,6 +85,12 @@ export function profileToFormValues(profile: Profile): FormValues {
  * 空欄のシークレットは省略する（＝AppService 側で既存シークレット据え置き）。
  */
 export function buildProfileFromForm(v: FormValues): Profile {
+  const timeout = v.connectTimeoutMs.trim() !== '' ? Number(v.connectTimeoutMs) : undefined;
+  const common = {
+    ...(timeout !== undefined && !Number.isNaN(timeout) ? { connectTimeoutMs: timeout } : {}),
+    ...(v.autoReconnect ? { autoReconnect: true } : {}),
+  };
+
   if (v.protocol === 'ftp') {
     return {
       id: v.id,
@@ -87,6 +100,7 @@ export function buildProfileFromForm(v: FormValues): Profile {
       port: v.port,
       user: v.user,
       ftpSecurity: v.ftpSecurity,
+      ...common,
       ...(v.password ? { password: v.password } : {}),
     };
   }
@@ -99,6 +113,7 @@ export function buildProfileFromForm(v: FormValues): Profile {
       port: v.port,
       user: v.user,
       hostKeyPolicy: v.hostKeyPolicy,
+      ...common,
       ...(v.password ? { password: v.password } : {}),
       ...(v.privateKey ? { privateKey: v.privateKey } : {}),
       ...(v.passphrase ? { passphrase: v.passphrase } : {}),
@@ -110,6 +125,7 @@ export function buildProfileFromForm(v: FormValues): Profile {
     protocol: 's3',
     region: v.region,
     bucket: v.bucket,
+    ...common,
     ...(v.accessKeyId ? { accessKeyId: v.accessKeyId } : {}),
     ...(v.secretAccessKey ? { secretAccessKey: v.secretAccessKey } : {}),
   };

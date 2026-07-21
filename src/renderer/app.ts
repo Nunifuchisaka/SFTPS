@@ -258,6 +258,15 @@ export function mountApp(root: string | HTMLElement): void {
     const bucketIn = input(fv.bucket, 'バケット');
     const akidIn = input(fv.accessKeyId, 'Access Key ID');
     const secretIn = input('', editing ? 'Secret Access Key（変更時のみ）' : 'Secret Access Key', 'password');
+    const timeoutIn = input(fv.connectTimeoutMs, '接続タイムアウト(ms)', 'number');
+    const reconnectIn = h('input', { type: 'checkbox' }) as HTMLInputElement;
+    reconnectIn.checked = fv.autoReconnect;
+
+    const commonFields = (): HTMLElement =>
+      h('div', { class: 'form_1__fields' }, [
+        h('label', {}, ['タイムアウト(ms): ', timeoutIn]),
+        h('label', {}, [reconnectIn, ' 自動再接続']),
+      ]);
 
     function rebuildFields(): void {
       fields.replaceChildren(idIn, nameIn);
@@ -269,6 +278,7 @@ export function mountApp(root: string | HTMLElement): void {
       } else {
         fields.append(regionIn, bucketIn, akidIn, secretIn);
       }
+      fields.append(commonFields());
     }
     proto.addEventListener('change', rebuildFields);
     rebuildFields();
@@ -305,6 +315,8 @@ export function mountApp(root: string | HTMLElement): void {
         bucket: bucketIn.value.trim(),
         accessKeyId: akidIn.value.trim(),
         secretAccessKey: secretIn.value,
+        connectTimeoutMs: timeoutIn.value.trim(),
+        autoReconnect: reconnectIn.checked,
       };
       void saveProfile(buildProfileFromForm(values));
     });
