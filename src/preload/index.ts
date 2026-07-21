@@ -41,6 +41,7 @@ const api: SftpsApi = {
   saveSettings: (settings) => ipcRenderer.invoke(IPC.saveSettings, settings),
   isSecretStorageAvailable: () => ipcRenderer.invoke(IPC.isSecretStorageAvailable),
   listLocal: (dir) => ipcRenderer.invoke(IPC.listLocal, dir),
+  isDirectory: (p) => ipcRenderer.invoke(IPC.isDirectory, p),
   homeDir: () => ipcRenderer.invoke(IPC.homeDir),
   pickFile: () => ipcRenderer.invoke(IPC.pickFile),
   pickDirectory: () => ipcRenderer.invoke(IPC.pickDirectory),

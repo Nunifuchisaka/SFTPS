@@ -113,6 +113,7 @@ export const IPC = {
   saveSettings: 'settings:save',
   isSecretStorageAvailable: 'secret:available',
   listLocal: 'local:list',
+  isDirectory: 'local:isDirectory',
   homeDir: 'local:home',
   pickFile: 'dialog:pickFile',
   pickDirectory: 'dialog:pickDir',
@@ -180,6 +181,8 @@ export interface SftpsApi {
   saveSettings(settings: AppSettings): Promise<AppSettings>;
   isSecretStorageAvailable(): Promise<boolean>;
   listLocal(dir: string): Promise<RemoteEntry[]>;
+  /** ローカルパスがディレクトリか判定する（D&Dのフォルダ/ファイル振り分け用）。 */
+  isDirectory(path: string): Promise<boolean>;
   homeDir(): Promise<string>;
   pickFile(): Promise<string | null>;
   pickDirectory(): Promise<string | null>;

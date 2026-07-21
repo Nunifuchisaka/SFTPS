@@ -103,6 +103,7 @@ export interface IpcHandlerDeps {
   knownHosts: KnownHostsApi;
   settings: SettingsApi;
   listLocal(dir: string): Promise<RemoteEntry[]>;
+  isDirectory(path: string): Promise<boolean>;
   homeDir(): string;
   isSecretStorageAvailable(): boolean;
   pickFile(): Promise<string | null>;
@@ -282,6 +283,7 @@ export function createIpcHandlers(deps: IpcHandlerDeps) {
     // ---- local / dialogs ----
     isSecretStorageAvailable: (): boolean => deps.isSecretStorageAvailable(),
     listLocal: (dir: string) => deps.listLocal(dir),
+    isDirectory: (p: string) => deps.isDirectory(p),
     homeDir: (): string => deps.homeDir(),
     pickFile: () => deps.pickFile(),
     pickDirectory: () => deps.pickDirectory(),

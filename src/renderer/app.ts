@@ -10,10 +10,10 @@ import {
   sortEntries,
   toggleSelection,
   pruneSelection,
+  classifyDroppedPaths,
   resolveDropTargets,
   type SortKey,
   type SortDir,
-  type DroppedItem,
 } from '../core/browse/index';
 import { confirmDeletion, parseMode, isActionAvailable } from '../core/remoteops/index';
 import type { HistoryFilter, HistoryKind, HistoryStatus } from '../core/history/index';
@@ -946,19 +946,22 @@ export function mountApp(root: string | HTMLElement): void {
   }
 
   function handleOsDrop(files: FileList): void {
-    if (!state.currentProfileId) {
+    const profileId = state.currentProfileId;
+    if (!profileId) {
       setStatus('先にプロファイルへ接続してください', true);
       return;
     }
-    const items: DroppedItem[] = [];
+    // パス抽出は同期で済ませる（dataTransfer は drop ハンドラを抜けると失効するため）。
+    const paths: string[] = [];
     for (let i = 0; i < files.length; i++) {
       const path = api.getPathForFile(files[i]);
-      if (path) items.push({ path, isDirectory: false });
+      if (path) paths.push(path);
     }
-    if (items.length === 0) return;
-    const targets = resolveDropTargets(items, state.remoteDir);
-    const requests = buildRequestsFromDropTargets(state.currentProfileId, targets);
+    if (paths.length === 0) return;
     void (async () => {
+      const items = await classifyDroppedPaths(paths, (p) => api.isDirectory(p));
+      const targets = resolveDropTargets(items, state.remoteDir);
+      const requests = buildRequestsFromDropTargets(profileId, targets);
       for (const req of requests) await api.enqueueTransfer(req);
       setStatus(`${requests.length}件をドロップからキューに追加しました`);
       await refreshQueue();

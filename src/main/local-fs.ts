@@ -23,3 +23,13 @@ export async function listLocalDir(dir: string): Promise<RemoteEntry[]> {
   }
   return entries;
 }
+
+/** パスがディレクトリなら true。stat できない（不存在・アクセス不可）場合は false。 */
+export async function isLocalDirectory(p: string): Promise<boolean> {
+  try {
+    const st = await stat(p);
+    return st.isDirectory();
+  } catch {
+    return false;
+  }
+}

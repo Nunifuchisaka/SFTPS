@@ -23,7 +23,7 @@ import { BookmarkFile } from './bookmark-store';
 import { SettingsFile } from './settings-store';
 import { SettingsController } from './settings-controller';
 import { TerminalTaskRecorder } from './history-recorder';
-import { listLocalDir } from './local-fs';
+import { listLocalDir, isLocalDirectory } from './local-fs';
 import { registerIpc, type HistoryController } from './ipc/register';
 import type { HistoryStore, HistoryFilter, HistoryInput } from '../core/history/index';
 import type { AppSettings } from '../core/settings/index';
@@ -254,6 +254,7 @@ async function boot(): Promise<void> {
     knownHosts,
     settings,
     listLocal: (dir) => listLocalDir(dir),
+    isDirectory: (p) => isLocalDirectory(p),
     homeDir: () => homedir(),
     isSecretStorageAvailable: () => safeStorage.isEncryptionAvailable(),
     pickFile: async () => {

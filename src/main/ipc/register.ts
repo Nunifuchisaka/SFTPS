@@ -94,6 +94,7 @@ export function registerIpc(deps: IpcHandlerDeps): IpcHandlers {
 
   ipcMain.handle(IPC.isSecretStorageAvailable, () => h.isSecretStorageAvailable());
   ipcMain.handle(IPC.listLocal, (_e, dir: string) => h.listLocal(dir));
+  ipcMain.handle(IPC.isDirectory, (_e, p: string) => h.isDirectory(p));
   ipcMain.handle(IPC.homeDir, () => h.homeDir());
   ipcMain.handle(IPC.pickFile, () => h.pickFile());
   ipcMain.handle(IPC.pickDirectory, () => h.pickDirectory());

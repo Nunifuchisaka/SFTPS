@@ -98,6 +98,7 @@ function makeHarness(options: {
       },
     },
     listLocal: async () => [],
+    isDirectory: async (p) => p.endsWith('/dir'),
     homeDir: () => '/home/u',
     isSecretStorageAvailable: () => true,
     pickFile: async () => null,
@@ -349,5 +350,11 @@ describe('profile and settings handlers', () => {
     await h.handlers.listRemote('p1', '/pub');
     await h.handlers.prepareUpload('p1', '/l/a', '/r/a');
     expect(h.calls.map((c) => c.name)).toEqual(['listRemote', 'prepareUpload']);
+  });
+
+  it('delegates isDirectory to the deps', async () => {
+    const h = makeHarness();
+    await expect(h.handlers.isDirectory('/home/u/dir')).resolves.toBe(true);
+    await expect(h.handlers.isDirectory('/home/u/a.txt')).resolves.toBe(false);
   });
 });

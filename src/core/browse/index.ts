@@ -7,4 +7,9 @@ export {
   selectRange,
   pruneSelection,
 } from './selection';
-export { resolveDropTargets, type DroppedItem, type DropTarget } from './drop';
+export {
+  classifyDroppedPaths,
+  resolveDropTargets,
+  type DroppedItem,
+  type DropTarget,
+} from './drop';

@@ -24,6 +24,22 @@ function joinPosix(dir: string, name: string): string {
 }
 
 /**
+ * ドロップされたパス群を、判定関数でファイル/ディレクトリに分類する。
+ * 個別の判定が失敗したパスはファイル（upload 扱い）に落とし、全体は失敗させない。
+ */
+export async function classifyDroppedPaths(
+  paths: string[],
+  isDirectory: (p: string) => Promise<boolean>,
+): Promise<DroppedItem[]> {
+  return Promise.all(
+    paths.map(async (path) => ({
+      path,
+      isDirectory: await isDirectory(path).catch(() => false),
+    })),
+  );
+}
+
+/**
  * ドロップされた項目群を、配置先ディレクトリ配下の転送対象へ解決する純粋関数。
  * ファイルは upload、ディレクトリは sync として扱う。
  */
