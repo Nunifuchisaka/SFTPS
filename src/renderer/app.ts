@@ -15,6 +15,7 @@ import {
 import { confirmDeletion, parseMode, isActionAvailable } from '../core/remoteops/index';
 import type { HistoryFilter, HistoryKind, HistoryStatus } from '../core/history/index';
 import { createHistoryView } from './history-view';
+import { createTranslator, dictionaries, resolveLocale, LOCALES } from '../core/i18n/index';
 import type { QueueStatus, SyncFolderOptions } from '../shared/ipc';
 import { createDiffView, diffOrientationLabels } from './diff-view';
 import { createSyncPlanView } from './sync-view';
@@ -107,6 +108,13 @@ export function mountApp(root: string | HTMLElement): void {
     verifyAfterTransfer: false,
   };
 
+  const locale = resolveLocale(
+    window.localStorage.getItem('sftps.locale') ?? window.navigator.language,
+    LOCALES,
+    'ja',
+  );
+  const t = createTranslator(dictionaries, locale);
+
   function currentProtocol(): Protocol | null {
     const p = state.profiles.find((x) => x.id === state.currentProfileId);
     return p ? p.protocol : null;
@@ -167,14 +175,14 @@ export function mountApp(root: string | HTMLElement): void {
 
   function renderProfiles(): void {
     profilePanel.replaceChildren();
-    profilePanel.append(h('h2', {}, ['接続プロファイル']));
+    profilePanel.append(h('h2', {}, [t('panel.profiles')]));
 
     const list = h('ul', { class: 'list_1' });
     for (const p of state.profiles) {
       const active = p.id === state.currentProfileId;
       const item = h('li', { class: `list_1__item${active ? ' is_active' : ''}` }, [
         h('span', { class: 'list_1__label' }, [`${p.name} [${p.protocol}]`]),
-        h('button', { class: 'btn_1', onclick: () => void selectProfile(p.id) }, ['接続']),
+        h('button', { class: 'btn_1', onclick: () => void selectProfile(p.id) }, [t('btn.connect')]),
         h(
           'button',
           {
@@ -184,9 +192,9 @@ export function mountApp(root: string | HTMLElement): void {
               renderProfiles();
             },
           },
-          ['編集'],
+          [t('btn.edit')],
         ),
-        h('button', { class: 'btn_1', onclick: () => void deleteProfile(p.id) }, ['削除']),
+        h('button', { class: 'btn_1', onclick: () => void deleteProfile(p.id) }, [t('btn.delete')]),
       ]);
       list.append(item);
     }
@@ -263,7 +271,7 @@ export function mountApp(root: string | HTMLElement): void {
     proto.addEventListener('change', rebuildFields);
     rebuildFields();
 
-    const submit = h('button', { class: 'btn_1 btn_1--primary', type: 'submit' }, ['保存']);
+    const submit = h('button', { class: 'btn_1 btn_1--primary', type: 'submit' }, [t('btn.save')]);
     const newBtn = h(
       'button',
       {
@@ -274,7 +282,7 @@ export function mountApp(root: string | HTMLElement): void {
           renderProfiles();
         },
       },
-      ['新規'],
+      [t('btn.new')],
     );
 
     form.addEventListener('submit', (ev) => {
@@ -300,7 +308,7 @@ export function mountApp(root: string | HTMLElement): void {
     });
 
     form.append(
-      h('h3', {}, [editing ? `プロファイル編集: ${editing.id}` : 'プロファイル新規追加']),
+      h('h3', {}, [editing ? t('form.editProfile', { id: editing.id }) : t('form.newProfile')]),
       proto,
       fields,
       h('div', { class: 'form_1__actions' }, [submit, newBtn]),
@@ -390,10 +398,10 @@ export function mountApp(root: string | HTMLElement): void {
     });
 
     localPanel.append(
-      h('h2', {}, ['ローカル']),
+      h('h2', {}, [t('browser.local')]),
       h('div', { class: 'browser_1__path' }, [state.localDir || '(未選択)']),
       h('div', { class: 'browser_1__tools' }, [
-        h('button', { class: 'btn_1', onclick: () => void loadLocal(parentDir(state.localDir)) }, ['..上へ']),
+        h('button', { class: 'btn_1', onclick: () => void loadLocal(parentDir(state.localDir)) }, [t('btn.up')]),
         filterIn,
         sortHeader('名前', 'name', state.localSort, (s) => {
           state.localSort = s;
@@ -499,10 +507,10 @@ export function mountApp(root: string | HTMLElement): void {
     });
 
     remotePanel.append(
-      h('h2', {}, ['リモート（ここにOSからファイルをドロップでUL）']),
+      h('h2', {}, [t('browser.remoteDropHint')]),
       h('div', { class: 'browser_1__path' }, [state.remoteDir]),
       h('div', { class: 'browser_1__tools' }, [
-        h('button', { class: 'btn_1', onclick: () => void loadRemote(parentDir(state.remoteDir)) }, ['..上へ']),
+        h('button', { class: 'btn_1', onclick: () => void loadRemote(parentDir(state.remoteDir)) }, [t('btn.up')]),
         filterIn,
         sortHeader('名前', 'name', state.remoteSort, (s) => {
           state.remoteSort = s;
@@ -581,7 +589,7 @@ export function mountApp(root: string | HTMLElement): void {
       if (e.type === 'file' && protocol && isActionAvailable(protocol, 'chmod')) {
         children.push(h('button', { class: 'btn_1', onclick: () => startChmod(e.path) }, ['権限']));
       }
-      children.push(h('button', { class: 'btn_1', onclick: () => void doDelete(e) }, ['削除']));
+      children.push(h('button', { class: 'btn_1', onclick: () => void doDelete(e) }, [t('btn.delete')]));
 
       const selected = e.type === 'file' && e.path === state.selectedRemote;
       list.append(h('li', { class: `list_1__item${selected ? ' is_active' : ''}` }, children));
@@ -699,7 +707,7 @@ export function mountApp(root: string | HTMLElement): void {
   // ---- transfer / diff ------------------------------------------------------
   function renderTransfer(): void {
     transferPanel.replaceChildren();
-    transferPanel.append(h('h2', {}, ['アップロード']));
+    transferPanel.append(h('h2', {}, [t('panel.upload')]));
 
     const localLabel = h('div', {}, [`ローカル: ${state.selectedLocal ?? '(未選択)'}`]);
     const pickBtn = h('button', { class: 'btn_1', onclick: () => void pickLocalFile() }, ['ファイル選択...']);
@@ -845,7 +853,7 @@ export function mountApp(root: string | HTMLElement): void {
 
   function renderBackups(remotePath: string, backups: BackupInfo[]): void {
     backupPanel.replaceChildren();
-    backupPanel.append(h('h2', {}, ['バックアップ履歴']), h('div', {}, [remotePath]));
+    backupPanel.append(h('h2', {}, [t('panel.backups')]), h('div', {}, [remotePath]));
     if (backups.length === 0) {
       backupPanel.append(h('div', {}, ['履歴なし']));
       return;
@@ -901,7 +909,7 @@ export function mountApp(root: string | HTMLElement): void {
     });
 
     syncPanel.append(
-      h('h2', {}, ['フォルダ差分同期']),
+      h('h2', {}, [t('panel.sync')]),
       h('div', {}, [`ローカル: ${state.syncLocalDir ?? '(未選択)'}`]),
       h('button', { class: 'btn_1', onclick: () => void pickSyncDir() }, ['フォルダ選択...']),
       h('label', {}, ['先: ', remoteIn]),
@@ -1000,7 +1008,7 @@ export function mountApp(root: string | HTMLElement): void {
 
   function renderQueue(status: QueueStatus): void {
     queuePanel.replaceChildren();
-    queuePanel.append(h('h2', {}, ['転送キュー']));
+    queuePanel.append(h('h2', {}, [t('panel.queue')]));
 
     const pct = Math.round(status.overall.ratio * 100);
     const fill = h('div', { class: 'queue_1__barfill' });
@@ -1079,7 +1087,7 @@ export function mountApp(root: string | HTMLElement): void {
     );
 
     historyPanel.append(
-      h('h2', {}, ['転送履歴']),
+      h('h2', {}, [t('panel.history')]),
       h('div', { class: 'browser_1__tools' }, [kindSel, statusSel, clearBtn]),
       createHistoryView(entries),
     );
@@ -1094,10 +1102,24 @@ export function mountApp(root: string | HTMLElement): void {
     renderRemote();
   });
 
+  const langSel = h(
+    'select',
+    { class: 'form_1__input' },
+    LOCALES.map((l) => h('option', { value: l }, [l])),
+  ) as HTMLSelectElement;
+  langSel.value = locale;
+  langSel.addEventListener('change', () => {
+    window.localStorage.setItem('sftps.locale', langSel.value);
+    window.location.reload();
+  });
+
   container.replaceChildren(
     h('header', { class: 'header_1' }, [
-      h('h1', {}, ['SFTPS — FTP / SFTP / S3 クライアント']),
-      h('label', { class: 'header_1__toggle' }, [hiddenChk, ' 隠しファイル表示']),
+      h('h1', {}, [t('app.title')]),
+      h('div', { class: 'header_1__controls' }, [
+        h('label', { class: 'header_1__toggle' }, [hiddenChk, ` ${t('header.showHidden')}`]),
+        h('label', { class: 'header_1__toggle' }, [`${t('header.language')}: `, langSel]),
+      ]),
     ]),
     secretWarn,
     h('main', { class: 'layout_1' }, [

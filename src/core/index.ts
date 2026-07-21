@@ -11,3 +11,4 @@ export * from './browse/index';
 export * from './remoteops/index';
 export * from './history/index';
 export * from './checksum/index';
+export * from './i18n/index';

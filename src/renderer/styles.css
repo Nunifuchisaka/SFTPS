@@ -132,9 +132,22 @@ h3 {
   justify-content: space-between;
 }
 
+.header_1__controls {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
 .header_1__toggle {
   font-size: 12px;
   color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.header_1__toggle .form_1__input {
+  width: auto;
 }
 
 .btn_1 {
