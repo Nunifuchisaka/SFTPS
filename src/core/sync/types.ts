@@ -5,6 +5,8 @@ export interface SyncEntry {
   type: 'file' | 'dir';
   size: number;
   modifiedAt: Date | null;
+  /** 内容ハッシュ（compareBy='checksum' 時に walkTree が埋める）。未計算なら undefined。 */
+  hash?: string;
 }
 
 export type SyncActionType = 'upload' | 'create-dir' | 'skip' | 'delete-extra';
@@ -17,8 +19,8 @@ export interface SyncAction {
   reason: string;
 }
 
-/** 変更判定の基準。 */
-export type CompareBy = 'size' | 'mtime' | 'size-and-mtime';
+/** 変更判定の基準。checksum は最も厳密だが両側の内容を読むためコストが高い。 */
+export type CompareBy = 'size' | 'mtime' | 'size-and-mtime' | 'checksum';
 
 export interface PlanOptions {
   /** 変更判定基準。既定 'size-and-mtime'。 */

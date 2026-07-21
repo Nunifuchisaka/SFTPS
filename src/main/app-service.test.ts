@@ -190,6 +190,28 @@ describe('AppService', () => {
     await expect(service.chmodRemote('p1', '/c.txt', 0o644)).resolves.toBeUndefined();
   });
 
+  it('prepareSync with compareBy checksum detects same-size content changes', async () => {
+    await service.saveProfile(ftpProfile);
+    const srcDir = join(dir, 'csrc');
+    await writeLocal(join(srcDir, 'a.txt'), Buffer.from('AAA', 'utf8'));
+    await transport.connect();
+    await transport.writeFile('/cdst/a.txt', Buffer.from('BBB', 'utf8')); // same size, different content
+
+    const sizePlan = await service.prepareSync('p1', srcDir, '/cdst', { compareBy: 'size' });
+    expect(sizePlan.summary.upload).toBe(0); // size compare misses it
+
+    const checkPlan = await service.prepareSync('p1', srcDir, '/cdst', { compareBy: 'checksum' });
+    expect(checkPlan.summary.upload).toBe(1); // checksum catches it
+  });
+
+  it('commitUpload passes verifyAfterTransfer through to the core', async () => {
+    await service.saveProfile(ftpProfile);
+    const localPath = join(localDir, 'vv.txt');
+    await writeLocal(localPath, Buffer.from('checkme', 'utf8'));
+    const result = await service.commitUpload('p1', localPath, '/vv.txt', { verifyAfterTransfer: true });
+    expect(result.verified).toBe(true);
+  });
+
   it('download writes the remote file to a local path', async () => {
     await service.saveProfile(ftpProfile);
     await transport.connect();

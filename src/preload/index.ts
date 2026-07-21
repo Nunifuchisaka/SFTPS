@@ -9,8 +9,8 @@ const api: SftpsApi = {
   listRemote: (id, remoteDir) => ipcRenderer.invoke(IPC.listRemote, id, remoteDir),
   prepareUpload: (id, localPath, remotePath) =>
     ipcRenderer.invoke(IPC.prepareUpload, id, localPath, remotePath),
-  commitUpload: (id, localPath, remotePath) =>
-    ipcRenderer.invoke(IPC.commitUpload, id, localPath, remotePath),
+  commitUpload: (id, localPath, remotePath, options) =>
+    ipcRenderer.invoke(IPC.commitUpload, id, localPath, remotePath, options),
   prepareSync: (id, localDir, remoteDir, options) =>
     ipcRenderer.invoke(IPC.prepareSync, id, localDir, remoteDir, options),
   commitSync: (id, localDir, remoteDir, options) =>

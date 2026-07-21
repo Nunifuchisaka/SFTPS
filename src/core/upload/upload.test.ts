@@ -86,4 +86,16 @@ describe('upload coordinator (integration, real file I/O)', () => {
     expect((await transport.readFile('/f.txt')).toString('utf8')).toBe('NEW');
     expect(await mgr.listBackups('p1', '/f.txt')).toHaveLength(1);
   });
+
+  it('commitUpload verifies integrity after transfer when requested', async () => {
+    const localPath = join(localDir, 'v.txt');
+    await fsWriteFile(localPath, Buffer.from('verify-me', 'utf8'));
+    const mgr = new BackupManager({ backupRoot: backupDir });
+
+    const result = await commitUpload(transport, mgr, 'p1', localPath, '/v.txt', {
+      verifyAfterTransfer: true,
+    });
+    expect(result.verified).toBe(true);
+    expect((await transport.readFile('/v.txt')).toString('utf8')).toBe('verify-me');
+  });
 });

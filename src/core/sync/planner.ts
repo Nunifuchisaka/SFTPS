@@ -14,6 +14,15 @@ function fileVerdict(
   const sizeDiff = source.size !== dest.size;
   const newer = isSourceNewer(source, dest);
 
+  if (compareBy === 'checksum') {
+    if (source.hash !== undefined && dest.hash !== undefined) {
+      return source.hash !== dest.hash
+        ? { upload: true, reason: 'checksum changed' }
+        : { upload: false, reason: 'unchanged' };
+    }
+    // ハッシュ未計算時はサイズ比較にフォールバック。
+    return sizeDiff ? { upload: true, reason: 'size changed' } : { upload: false, reason: 'unchanged' };
+  }
   if (compareBy === 'size') {
     return sizeDiff ? { upload: true, reason: 'size changed' } : { upload: false, reason: 'unchanged' };
   }

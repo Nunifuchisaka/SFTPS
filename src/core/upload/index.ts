@@ -2,6 +2,12 @@ import { readFile } from 'node:fs/promises';
 import type { RemoteTransport } from '../transport/types';
 import type { BackupManager } from '../backup/index';
 import { diffContent, isBinary, type DiffSegment, type DiffSummary } from '../diff/index';
+import { verifyBuffers } from '../checksum/index';
+
+export interface CommitOptions {
+  /** true のとき、書き込み後に宛先を読み直してハッシュ比較する（不一致なら例外・追加 read コスト）。 */
+  verifyAfterTransfer?: boolean;
+}
 
 export interface UploadPreview {
   localPath: string;
@@ -23,6 +29,8 @@ export interface CommitResult {
   /** 取得したバックアップの絶対パス。新規で取得しなかった場合は null。 */
   backupPath: string | null;
   bytesWritten: number;
+  /** verifyAfterTransfer 有効時に整合性検証が成功したか。 */
+  verified?: boolean;
 }
 
 /**
@@ -82,9 +90,19 @@ export async function commitUpload(
   profileId: string,
   localPath: string,
   remotePath: string,
+  options: CommitOptions = {},
 ): Promise<CommitResult> {
   const backupPath = await backupManager.backupExisting(transport, profileId, remotePath);
   const data = await readFile(localPath);
   await transport.writeFile(remotePath, data);
-  return { backupPath, bytesWritten: data.length };
+
+  const result: CommitResult = { backupPath, bytesWritten: data.length };
+  if (options.verifyAfterTransfer) {
+    const readBack = await transport.readFile(remotePath);
+    if (!verifyBuffers(data, readBack).ok) {
+      throw new Error(`integrity check failed after upload: ${remotePath}`);
+    }
+    result.verified = true;
+  }
+  return result;
 }

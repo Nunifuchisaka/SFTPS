@@ -98,9 +98,14 @@ export class AppService {
     );
   }
 
-  async commitUpload(id: string, localPath: string, remotePath: string): Promise<CommitResult> {
+  async commitUpload(
+    id: string,
+    localPath: string,
+    remotePath: string,
+    options: { verifyAfterTransfer?: boolean } = {},
+  ): Promise<CommitResult> {
     return this.withTransport(id, (transport) =>
-      coreCommitUpload(transport, this.deps.backupManager, id, localPath, remotePath),
+      coreCommitUpload(transport, this.deps.backupManager, id, localPath, remotePath, options),
     );
   }
 
@@ -112,9 +117,10 @@ export class AppService {
     options: SyncFolderOptions = {},
   ): Promise<PrepareSyncResult> {
     return this.withTransport(id, async (dest) => {
+      const computeHash = options.compareBy === 'checksum';
       const source = await this.openLocalSource(localDir);
-      const sourceEntries = await walkTree(source, '/', { ignore: options.ignore });
-      const destEntries = await this.safeWalk(dest, remoteDir, options.ignore);
+      const sourceEntries = await walkTree(source, '/', { ignore: options.ignore, computeHash });
+      const destEntries = await this.safeWalk(dest, remoteDir, options.ignore, computeHash);
       const plan = planSync(sourceEntries, destEntries, {
         compareBy: options.compareBy,
         deleteExtraneous: options.deleteExtraneous,
@@ -131,10 +137,11 @@ export class AppService {
     options: SyncFolderOptions = {},
   ): Promise<CommitSyncResult> {
     return this.withTransport(id, async (dest) => {
+      const computeHash = options.compareBy === 'checksum';
       const source = await this.openLocalSource(localDir);
       await dest.mkdir(remoteDir);
-      const sourceEntries = await walkTree(source, '/', { ignore: options.ignore });
-      const destEntries = await this.safeWalk(dest, remoteDir, options.ignore);
+      const sourceEntries = await walkTree(source, '/', { ignore: options.ignore, computeHash });
+      const destEntries = await this.safeWalk(dest, remoteDir, options.ignore, computeHash);
       const plan = planSync(sourceEntries, destEntries, {
         compareBy: options.compareBy,
         deleteExtraneous: options.deleteExtraneous,
@@ -159,9 +166,10 @@ export class AppService {
     transport: RemoteTransport,
     dir: string,
     ignore?: string[],
+    computeHash?: boolean,
   ): Promise<SyncEntry[]> {
     try {
-      return await walkTree(transport, dir, { ignore });
+      return await walkTree(transport, dir, { ignore, computeHash });
     } catch {
       // リモート側にディレクトリがまだ存在しない場合は空とみなす。
       return [];

@@ -10,3 +10,4 @@ export * from './queue/index';
 export * from './browse/index';
 export * from './remoteops/index';
 export * from './history/index';
+export * from './checksum/index';

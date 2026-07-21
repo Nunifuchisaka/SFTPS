@@ -3,6 +3,7 @@ import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LocalTransport } from '../transport/index';
+import { hashBuffer } from '../checksum/index';
 import { walkTree } from './walk';
 
 describe('walkTree', () => {
@@ -44,5 +45,12 @@ describe('walkTree', () => {
     const paths = entries.map((e) => e.path);
     expect(paths.indexOf('sub')).toBeLessThan(paths.indexOf('sub/b.txt'));
     expect(paths.indexOf('sub/deep')).toBeLessThan(paths.indexOf('sub/deep/c.txt'));
+  });
+
+  it('computes content hashes for files when requested (dirs have none)', async () => {
+    const entries = await walkTree(t, '/', { computeHash: true });
+    const byPath = Object.fromEntries(entries.map((e) => [e.path, e]));
+    expect(byPath['a.txt'].hash).toBe(hashBuffer(Buffer.from('aaa')));
+    expect(byPath['sub'].hash).toBeUndefined();
   });
 });

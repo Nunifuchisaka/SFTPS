@@ -74,6 +74,15 @@ describe('download (integration, two LocalTransports, no mocks)', () => {
     expect((await backupManager.restore(downloadBackupKey('p1'), '/f.txt')).toString()).toBe('OLD');
   });
 
+  it('commitDownload verifies integrity after transfer when requested', async () => {
+    await remote.writeFile('/v.txt', Buffer.from('verify-me', 'utf8'));
+    const result = await commitDownload(remote, local, backupManager, 'p1', '/v.txt', '/v.txt', {
+      verifyAfterTransfer: true,
+    });
+    expect(result.verified).toBe(true);
+    expect((await local.readFile('/v.txt')).toString()).toBe('verify-me');
+  });
+
   it('commitDownload skips backup for a new local file', async () => {
     await remote.writeFile('/fresh.txt', Buffer.from('fresh', 'utf8'));
     const result = await commitDownload(remote, local, backupManager, 'p1', '/fresh.txt', '/fresh.txt');

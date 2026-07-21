@@ -68,8 +68,10 @@ export function registerIpc(
   ipcMain.handle(IPC.prepareUpload, (_e, id: string, local: string, remote: string) =>
     service.prepareUpload(id, local, remote),
   );
-  ipcMain.handle(IPC.commitUpload, (_e, id: string, local: string, remote: string) =>
-    service.commitUpload(id, local, remote),
+  ipcMain.handle(
+    IPC.commitUpload,
+    (_e, id: string, local: string, remote: string, options?: { verifyAfterTransfer?: boolean }) =>
+      service.commitUpload(id, local, remote, options),
   );
   ipcMain.handle(
     IPC.prepareSync,

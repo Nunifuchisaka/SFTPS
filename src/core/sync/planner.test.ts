@@ -57,6 +57,29 @@ describe('planSync compareBy', () => {
   });
 });
 
+describe('planSync compareBy checksum', () => {
+  function fh(path: string, size: number, hash: string, ms?: number): SyncEntry {
+    return { path, type: 'file', size, modifiedAt: ms === undefined ? null : new Date(ms), hash };
+  }
+
+  it('skips when hashes match even if mtime differs', () => {
+    expect(
+      planSync([fh('a.txt', 3, 'H1', 2000)], [fh('a.txt', 3, 'H1', 1000)], { compareBy: 'checksum' }),
+    ).toEqual([{ type: 'skip', path: 'a.txt', reason: 'unchanged' }]);
+  });
+
+  it('uploads when content differs at the same size (a size compare would miss it)', () => {
+    const source = [fh('a.txt', 3, 'H1')];
+    const dest = [fh('a.txt', 3, 'H2')];
+    expect(planSync(source, dest, { compareBy: 'size' })).toEqual([
+      { type: 'skip', path: 'a.txt', reason: 'unchanged' },
+    ]);
+    expect(planSync(source, dest, { compareBy: 'checksum' })).toEqual([
+      { type: 'upload', path: 'a.txt', reason: 'checksum changed' },
+    ]);
+  });
+});
+
 describe('planSync delete-extra', () => {
   const source = [f('a.txt', 3, 1000)];
   const dest = [f('a.txt', 3, 1000), f('old.txt', 1, 500)];

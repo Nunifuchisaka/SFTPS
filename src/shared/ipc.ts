@@ -88,7 +88,12 @@ export interface SftpsApi {
   testConnection(id: string): Promise<ConnectionResult>;
   listRemote(id: string, remoteDir: string): Promise<RemoteEntry[]>;
   prepareUpload(id: string, localPath: string, remotePath: string): Promise<UploadPreview>;
-  commitUpload(id: string, localPath: string, remotePath: string): Promise<CommitResult>;
+  commitUpload(
+    id: string,
+    localPath: string,
+    remotePath: string,
+    options?: { verifyAfterTransfer?: boolean },
+  ): Promise<CommitResult>;
   prepareSync(
     id: string,
     localDir: string,

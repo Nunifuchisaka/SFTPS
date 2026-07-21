@@ -77,6 +77,7 @@ interface State {
   renamingPath: string | null;
   chmodPath: string | null;
   historyFilter: HistoryFilter;
+  verifyAfterTransfer: boolean;
 }
 
 export function mountApp(root: string | HTMLElement): void {
@@ -103,6 +104,7 @@ export function mountApp(root: string | HTMLElement): void {
     renamingPath: null,
     chmodPath: null,
     historyFilter: {},
+    verifyAfterTransfer: false,
   };
 
   function currentProtocol(): Protocol | null {
@@ -728,10 +730,17 @@ export function mountApp(root: string | HTMLElement): void {
       ['キューに追加'],
     );
 
+    const verifyChk = h('input', { type: 'checkbox' }) as HTMLInputElement;
+    verifyChk.checked = state.verifyAfterTransfer;
+    verifyChk.addEventListener('change', () => {
+      state.verifyAfterTransfer = verifyChk.checked;
+    });
+
     transferPanel.append(
       localLabel,
       pickBtn,
       h('label', {}, ['先: ', remoteIn]),
+      h('label', {}, [verifyChk, ' 転送後にチェックサム検証']),
       previewBtn,
       enqueueBtn,
       diffPanel,
@@ -772,11 +781,14 @@ export function mountApp(root: string | HTMLElement): void {
   async function commitUpload(remotePath: string): Promise<void> {
     if (!state.currentProfileId || !state.selectedLocal) return;
     const r = await guard('アップロード確定', () =>
-      api.commitUpload(state.currentProfileId as string, state.selectedLocal as string, remotePath),
+      api.commitUpload(state.currentProfileId as string, state.selectedLocal as string, remotePath, {
+        verifyAfterTransfer: state.verifyAfterTransfer,
+      }),
     );
     if (r) {
       setStatus(
         `アップロード完了: ${r.bytesWritten}B` +
+          (r.verified ? ' / 検証OK' : '') +
           (r.backupPath ? ` / バックアップ: ${r.backupPath}` : ' / バックアップなし（新規）'),
       );
       await loadRemote(state.remoteDir);
@@ -879,6 +891,7 @@ export function mountApp(root: string | HTMLElement): void {
       h('option', { value: 'size-and-mtime' }, ['サイズ+更新時刻']),
       h('option', { value: 'size' }, ['サイズのみ']),
       h('option', { value: 'mtime' }, ['更新時刻のみ']),
+      h('option', { value: 'checksum' }, ['チェックサム（厳密・低速）']),
     ]) as HTMLSelectElement;
     const delChk = h('input', { type: 'checkbox' }) as HTMLInputElement;
 

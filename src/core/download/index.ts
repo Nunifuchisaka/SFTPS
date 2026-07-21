@@ -1,6 +1,12 @@
 import type { RemoteTransport } from '../transport/index';
 import type { BackupManager } from '../backup/index';
 import { diffContent, isBinary, type DiffSegment, type DiffSummary } from '../diff/index';
+import { verifyBuffers } from '../checksum/index';
+
+export interface DownloadCommitOptions {
+  /** true のとき、書き込み後にローカルを読み直してハッシュ比較する（不一致なら例外）。 */
+  verifyAfterTransfer?: boolean;
+}
 
 export interface DownloadPreview {
   localPath: string;
@@ -21,6 +27,8 @@ export interface DownloadResult {
   /** 取得したバックアップの絶対パス。新規で取得しなかった場合は null。 */
   backupPath: string | null;
   bytesWritten: number;
+  /** verifyAfterTransfer 有効時に整合性検証が成功したか。 */
+  verified?: boolean;
 }
 
 /**
@@ -90,9 +98,19 @@ export async function commitDownload(
   profileId: string,
   remotePath: string,
   localPath: string,
+  options: DownloadCommitOptions = {},
 ): Promise<DownloadResult> {
   const backupPath = await backupManager.backupExisting(local, downloadBackupKey(profileId), localPath);
   const data = await remote.readFile(remotePath);
   await local.writeFile(localPath, data);
-  return { backupPath, bytesWritten: data.length };
+
+  const result: DownloadResult = { backupPath, bytesWritten: data.length };
+  if (options.verifyAfterTransfer) {
+    const readBack = await local.readFile(localPath);
+    if (!verifyBuffers(data, readBack).ok) {
+      throw new Error(`integrity check failed after download: ${localPath}`);
+    }
+    result.verified = true;
+  }
+  return result;
 }

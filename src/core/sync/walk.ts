@@ -1,5 +1,6 @@
 import type { RemoteTransport } from '../transport/index';
 import { posixJoin, toPosixPath } from '../transport/path-utils';
+import { hashBuffer } from '../checksum/index';
 import { DEFAULT_IGNORE, isIgnored } from './ignore';
 import type { SyncEntry } from './types';
 
@@ -8,6 +9,8 @@ export interface WalkOptions {
   ignore?: string[];
   /** 再帰の深さ上限（既定 64）。対称リンク等による無限ループの保険。 */
   maxDepth?: number;
+  /** true のとき各ファイルの内容を読んでハッシュを計算する（checksum 比較用・コスト高）。 */
+  computeHash?: boolean;
 }
 
 /**
@@ -21,6 +24,7 @@ export async function walkTree(
 ): Promise<SyncEntry[]> {
   const ignore = options.ignore ?? DEFAULT_IGNORE;
   const maxDepth = options.maxDepth ?? 64;
+  const computeHash = options.computeHash ?? false;
   const baseNorm = toPosixPath(base);
   const result: SyncEntry[] = [];
 
@@ -30,9 +34,19 @@ export async function walkTree(
     for (const entry of entries) {
       const rel = relPrefix === '' ? entry.name : `${relPrefix}/${entry.name}`;
       if (isIgnored(rel, ignore)) continue;
-      result.push({ path: rel, type: entry.type, size: entry.size, modifiedAt: entry.modifiedAt });
+      const childAbs = posixJoin(dirAbs, entry.name);
+      const syncEntry: SyncEntry = {
+        path: rel,
+        type: entry.type,
+        size: entry.size,
+        modifiedAt: entry.modifiedAt,
+      };
+      if (computeHash && entry.type === 'file') {
+        syncEntry.hash = hashBuffer(await transport.readFile(childAbs));
+      }
+      result.push(syncEntry);
       if (entry.type === 'dir') {
-        await walk(posixJoin(dirAbs, entry.name), rel, depth + 1);
+        await walk(childAbs, rel, depth + 1);
       }
     }
   }
