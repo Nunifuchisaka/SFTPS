@@ -1,4 +1,19 @@
+/* ライトテーマ（既定トークン） */
 :root {
+  --bg: #f5f6f8;
+  --panel: #ffffff;
+  --line: #d5d8de;
+  --text: #1c1e22;
+  --muted: #6b7280;
+  --accent: #2563eb;
+  --added: #1a7f37;
+  --removed: #cf222e;
+  --btn-bg: #eef0f4;
+  --input-bg: #ffffff;
+}
+
+/* ダークテーマ（data-theme="dark" で上書き） */
+[data-theme='dark'] {
   --bg: #1e1f24;
   --panel: #2a2c33;
   --line: #3a3d46;
@@ -7,6 +22,8 @@
   --accent: #4f8cff;
   --added: #2ea043;
   --removed: #f85149;
+  --btn-bg: #333640;
+  --input-bg: #1c1d22;
 }
 
 * {
@@ -152,7 +169,7 @@ h3 {
 
 .btn_1 {
   border: 1px solid var(--line);
-  background: #333640;
+  background: var(--btn-bg);
   color: var(--text);
   border-radius: 5px;
   padding: 3px 8px;
@@ -195,7 +212,7 @@ h3 {
   padding: 5px 7px;
   border: 1px solid var(--line);
   border-radius: 5px;
-  background: #1c1d22;
+  background: var(--input-bg);
   color: var(--text);
   font-family: inherit;
 }
@@ -233,7 +250,7 @@ textarea.form_1__input {
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #1c1d22;
+  background: var(--input-bg);
   white-space: pre-wrap;
   word-break: break-all;
   max-height: 320px;
@@ -317,7 +334,7 @@ textarea.form_1__input {
 
 .queue_1__bar {
   height: 8px;
-  background: #1c1d22;
+  background: var(--input-bg);
   border: 1px solid var(--line);
   border-radius: 4px;
   overflow: hidden;

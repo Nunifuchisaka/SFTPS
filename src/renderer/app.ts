@@ -16,6 +16,8 @@ import { confirmDeletion, parseMode, isActionAvailable } from '../core/remoteops
 import type { HistoryFilter, HistoryKind, HistoryStatus } from '../core/history/index';
 import { createHistoryView } from './history-view';
 import { createTranslator, dictionaries, resolveLocale, LOCALES } from '../core/i18n/index';
+import { normalizeThemeSetting, THEME_SETTINGS, type ThemeSetting } from '../core/theme/index';
+import { applyTheme } from './theme';
 import type { QueueStatus, SyncFolderOptions } from '../shared/ipc';
 import { createDiffView, diffOrientationLabels } from './diff-view';
 import { createSyncPlanView } from './sync-view';
@@ -1113,11 +1115,32 @@ export function mountApp(root: string | HTMLElement): void {
     window.location.reload();
   });
 
+  let themeSetting = normalizeThemeSetting(window.localStorage.getItem('sftps.theme'));
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const refreshTheme = (): void => {
+    applyTheme(document.documentElement, themeSetting, media.matches);
+  };
+  refreshTheme();
+  media.addEventListener('change', refreshTheme);
+
+  const themeSel = h(
+    'select',
+    { class: 'form_1__input' },
+    THEME_SETTINGS.map((s) => h('option', { value: s }, [s])),
+  ) as HTMLSelectElement;
+  themeSel.value = themeSetting;
+  themeSel.addEventListener('change', () => {
+    themeSetting = themeSel.value as ThemeSetting;
+    window.localStorage.setItem('sftps.theme', themeSetting);
+    refreshTheme();
+  });
+
   container.replaceChildren(
     h('header', { class: 'header_1' }, [
       h('h1', {}, [t('app.title')]),
       h('div', { class: 'header_1__controls' }, [
         h('label', { class: 'header_1__toggle' }, [hiddenChk, ` ${t('header.showHidden')}`]),
+        h('label', { class: 'header_1__toggle' }, [`${t('header.theme')}: `, themeSel]),
         h('label', { class: 'header_1__toggle' }, [`${t('header.language')}: `, langSel]),
       ]),
     ]),
