@@ -37,13 +37,13 @@ function createMainTranslator(): Translate {
 
 /** 永続化の失敗を握り潰さず、ログとダイアログの両方に出す。 */
 function reportStoreError(t: Translate, file: string, err: unknown): void {
-  console.error(`[sftps] failed to persist ${file}:`, err);
+  console.error(`[funabinftp] failed to persist ${file}:`, err);
   dialog.showErrorBox(t('store.saveFailed', { file }), err instanceof Error ? err.message : String(err));
 }
 
 /** 復旧不能な起動時エラー。空データで続行せず終了する（フェイルクローズ）。 */
 function fatal(t: Translate, file: string, err: unknown): never {
-  console.error(`[sftps] fatal: cannot load ${file}:`, err);
+  console.error(`[funabinftp] fatal: cannot load ${file}:`, err);
   dialog.showErrorBox(t('store.loadFailed', { file }), err instanceof Error ? err.message : String(err));
   app.exit(1);
   throw err;
@@ -182,11 +182,11 @@ function hardenWebContents(): void {
     contents.on('will-navigate', (event, url) => {
       if (!isAllowedNavigation(url, navigationPolicy())) {
         event.preventDefault();
-        console.warn(`[sftps] blocked navigation to ${url}`);
+        console.warn(`[funabinftp] blocked navigation to ${url}`);
       }
     });
     contents.setWindowOpenHandler(({ url }) => {
-      console.warn(`[sftps] blocked window.open to ${url}`);
+      console.warn(`[funabinftp] blocked window.open to ${url}`);
       return { action: 'deny' };
     });
   });
@@ -196,7 +196,7 @@ function createWindow(): void {
   const win = new BrowserWindow({
     width: 1180,
     height: 760,
-    title: 'SFTPS',
+    title: 'FunabinFTP',
     webPreferences: {
       // プリロードは CJS(.cjs) で出力する。sandbox: true のレンダラでは ESM プリロードを読めないため。
       preload: join(app.getAppPath(), 'out/preload/index.cjs'),

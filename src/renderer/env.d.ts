@@ -1,8 +1,8 @@
-import type { SftpsApi } from '../shared/ipc';
+import type { FunabinFtpApi } from '../shared/ipc';
 
 declare global {
   interface Window {
-    api: SftpsApi;
+    api: FunabinFtpApi;
   }
 }
 

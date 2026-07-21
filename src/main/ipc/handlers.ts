@@ -126,7 +126,7 @@ function errorMessage(err: unknown): string {
 export function createIpcHandlers(deps: IpcHandlerDeps) {
   const now = deps.now ?? (() => Date.now());
   const onDriveError =
-    deps.onDriveError ?? ((err: unknown) => console.error('[sftps] queue drive failed:', err));
+    deps.onDriveError ?? ((err: unknown) => console.error('[funabinftp] queue drive failed:', err));
   let seq = 0;
   const genId = (prefix: string): string => `${prefix}${now()}-${seq++}`;
 

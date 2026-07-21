@@ -11,7 +11,7 @@ export type Dictionaries = Record<string, Dictionary>;
  */
 export const dictionaries: Record<Locale, Dictionary> = {
   ja: {
-    'app.title': 'SFTPS — FTP / SFTP / S3 クライアント',
+    'app.title': 'FunabinFTP — FTP / SFTP / S3 クライアント',
     'header.showHidden': '隠しファイル表示',
     'header.language': '言語',
     'header.theme': 'テーマ',
@@ -72,7 +72,7 @@ export const dictionaries: Record<Locale, Dictionary> = {
     'store.saveFailed': '{file} を保存できませんでした。',
   },
   en: {
-    'app.title': 'SFTPS — FTP / SFTP / S3 Client',
+    'app.title': 'FunabinFTP — FTP / SFTP / S3 Client',
     'header.showHidden': 'Show hidden files',
     'header.language': 'Language',
     'header.theme': 'Theme',

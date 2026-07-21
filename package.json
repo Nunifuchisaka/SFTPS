@@ -1,5 +1,5 @@
 {
-  "name": "sftps",
+  "name": "funabinftp",
   "version": "0.0.0",
   "private": true,
   "description": "Cross-platform SFTP / FTP / Amazon S3 client",

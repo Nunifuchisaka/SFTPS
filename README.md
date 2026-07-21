@@ -1,4 +1,4 @@
-# SFTPS
+# FunabinFTP
 
 FTP / SFTP / Amazon S3 に対応した、クロスプラットフォーム（Windows / macOS）のデスクトップ FTP クライアントです。Electron 製で、アップロード時に **一文字単位の差分** を確認でき、上書き前に **自動バックアップ** を取ります。
 

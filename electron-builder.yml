@@ -1,5 +1,5 @@
-appId: com.nunifuchisaka.sftps
-productName: SFTPS
+appId: com.nunifuchisaka.funabinftp
+productName: FunabinFTP
 directories:
   output: release
   buildResources: build

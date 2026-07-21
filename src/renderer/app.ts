@@ -137,7 +137,7 @@ export function mountApp(root: string | HTMLElement): void {
   let bookmarkSeq = 0;
 
   const locale = resolveLocale(
-    window.localStorage.getItem('sftps.locale') ?? window.navigator.language,
+    window.localStorage.getItem('funabinftp.locale') ?? window.navigator.language,
     LOCALES,
     'ja',
   );
@@ -1443,11 +1443,11 @@ export function mountApp(root: string | HTMLElement): void {
   ) as HTMLSelectElement;
   langSel.value = locale;
   langSel.addEventListener('change', () => {
-    window.localStorage.setItem('sftps.locale', langSel.value);
+    window.localStorage.setItem('funabinftp.locale', langSel.value);
     window.location.reload();
   });
 
-  let themeSetting = normalizeThemeSetting(window.localStorage.getItem('sftps.theme'));
+  let themeSetting = normalizeThemeSetting(window.localStorage.getItem('funabinftp.theme'));
   const media = window.matchMedia('(prefers-color-scheme: dark)');
   const refreshTheme = (): void => {
     applyTheme(document.documentElement, themeSetting, media.matches);
@@ -1463,7 +1463,7 @@ export function mountApp(root: string | HTMLElement): void {
   themeSel.value = themeSetting;
   themeSel.addEventListener('change', () => {
     themeSetting = themeSel.value as ThemeSetting;
-    window.localStorage.setItem('sftps.theme', themeSetting);
+    window.localStorage.setItem('funabinftp.theme', themeSetting);
     refreshTheme();
   });
 

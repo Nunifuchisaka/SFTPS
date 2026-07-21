@@ -124,7 +124,7 @@ export const IPC = {
  * レンダラの window.api として公開される型付き API。
  * preload が実装し、main の ipcMain.handle が処理する。
  */
-export interface SftpsApi {
+export interface FunabinFtpApi {
   listProfiles(): Promise<Profile[]>;
   saveProfile(input: Profile, options?: SaveProfileOptions): Promise<Profile>;
   /**

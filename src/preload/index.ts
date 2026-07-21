@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
-import { IPC, type SftpsApi } from '../shared/ipc';
+import { IPC, type FunabinFtpApi } from '../shared/ipc';
 
-const api: SftpsApi = {
+const api: FunabinFtpApi = {
   listProfiles: () => ipcRenderer.invoke(IPC.listProfiles),
   saveProfile: (input, options) => ipcRenderer.invoke(IPC.saveProfile, input, options),
   deleteProfile: (id, options) => ipcRenderer.invoke(IPC.deleteProfile, id, options),
