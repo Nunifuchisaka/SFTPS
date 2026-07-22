@@ -100,5 +100,10 @@ export function registerIpc(deps: IpcHandlerDeps): IpcHandlers {
   ipcMain.handle(IPC.pickDirectory, () => h.pickDirectory());
   ipcMain.handle(IPC.pickSavePath, (_e, defaultName: string) => h.pickSavePath(defaultName));
 
+  ipcMain.handle(IPC.prepareReleaseDiff, (_e, localDir: string) => h.prepareReleaseDiff(localDir));
+  ipcMain.handle(IPC.createReleaseZip, (_e, repoRoot: string, files: string[], savePath: string) =>
+    h.createReleaseZip(repoRoot, files, savePath),
+  );
+
   return h;
 }

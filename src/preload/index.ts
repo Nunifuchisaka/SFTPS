@@ -47,6 +47,9 @@ const api: FunabinFtpApi = {
   pickDirectory: () => ipcRenderer.invoke(IPC.pickDirectory),
   pickSavePath: (defaultName) => ipcRenderer.invoke(IPC.pickSavePath, defaultName),
   getPathForFile: (file) => webUtils.getPathForFile(file),
+  prepareReleaseDiff: (localDir) => ipcRenderer.invoke(IPC.prepareReleaseDiff, localDir),
+  createReleaseZip: (repoRoot, files, savePath) =>
+    ipcRenderer.invoke(IPC.createReleaseZip, repoRoot, files, savePath),
 };
 
 contextBridge.exposeInMainWorld('api', api);

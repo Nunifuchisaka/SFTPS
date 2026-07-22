@@ -79,6 +79,22 @@ export interface CommitSyncResult {
   summary: PlanSummary;
 }
 
+/** 差分納品ファイル抽出のプレビュー結果。 */
+export interface PrepareReleaseDiffResult {
+  /** 自動検出した git リポジトリのルート。 */
+  repoRoot: string;
+  /** ACMR（追加・コピー・変更・リネーム）対象。zip 化候補。 */
+  files: string[];
+  /** D（削除）対象。zip には含めず、リモート側の手動削除警告に使う。 */
+  deletedFiles: string[];
+}
+
+/** zip 作成の実行結果。 */
+export interface CreateReleaseZipResult {
+  savePath: string;
+  fileCount: number;
+}
+
 /** IPC チャンネル名。preload と main で共有する。 */
 export const IPC = {
   listProfiles: 'profiles:list',
@@ -118,6 +134,8 @@ export const IPC = {
   pickFile: 'dialog:pickFile',
   pickDirectory: 'dialog:pickDir',
   pickSavePath: 'dialog:pickSave',
+  prepareReleaseDiff: 'release:prepareDiff',
+  createReleaseZip: 'release:createZip',
 } as const;
 
 /**
@@ -189,4 +207,11 @@ export interface FunabinFtpApi {
   pickSavePath(defaultName: string): Promise<string | null>;
   /** ドロップされた File の OS パスを取得する（preload の webUtils による同期呼び出し）。 */
   getPathForFile(file: File): string;
+  /**
+   * ローカルフォルダから git リポジトリルートを自動検出し、
+   * main..HEAD の差分（ACMR対象/D対象）を取得する（差分納品ファイル抽出）。
+   */
+  prepareReleaseDiff(localDir: string): Promise<PrepareReleaseDiffResult>;
+  /** 選択されたファイルだけを対象に `git archive HEAD` で zip を作成する。 */
+  createReleaseZip(repoRoot: string, files: string[], savePath: string): Promise<CreateReleaseZipResult>;
 }

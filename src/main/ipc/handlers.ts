@@ -16,6 +16,8 @@ import {
 import type {
   ConnectionResult,
   CommitSyncResult,
+  CreateReleaseZipResult,
+  PrepareReleaseDiffResult,
   PrepareSyncResult,
   QueueStatus,
   RestoreBackupResult,
@@ -109,6 +111,8 @@ export interface IpcHandlerDeps {
   pickFile(): Promise<string | null>;
   pickDirectory(): Promise<string | null>;
   pickSavePath(defaultName: string): Promise<string | null>;
+  prepareReleaseDiff(localDir: string): Promise<PrepareReleaseDiffResult>;
+  createReleaseZip(repoRoot: string, files: string[], savePath: string): Promise<void>;
   /** id 生成に使う時刻（テストで固定するため注入可能）。 */
   now?: () => number;
   /** 駆動中の例外の通知先（既定は console.error）。 */
@@ -288,6 +292,18 @@ export function createIpcHandlers(deps: IpcHandlerDeps) {
     pickFile: () => deps.pickFile(),
     pickDirectory: () => deps.pickDirectory(),
     pickSavePath: (defaultName: string) => deps.pickSavePath(defaultName),
+
+    // ---- 差分納品ファイル抽出 ----
+    prepareReleaseDiff: (localDir: string): Promise<PrepareReleaseDiffResult> =>
+      deps.prepareReleaseDiff(localDir),
+    async createReleaseZip(
+      repoRoot: string,
+      files: string[],
+      savePath: string,
+    ): Promise<CreateReleaseZipResult> {
+      await deps.createReleaseZip(repoRoot, files, savePath);
+      return { savePath, fileCount: files.length };
+    },
   };
 }
 

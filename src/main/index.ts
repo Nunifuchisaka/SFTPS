@@ -24,6 +24,7 @@ import { SettingsFile } from './settings-store';
 import { SettingsController } from './settings-controller';
 import { TerminalTaskRecorder } from './history-recorder';
 import { listLocalDir, isLocalDirectory } from './local-fs';
+import { prepareReleaseDiff, createReleaseZip } from './git-release';
 import { registerIpc, type HistoryController } from './ipc/register';
 import type { HistoryStore, HistoryFilter, HistoryInput } from '../core/history/index';
 import type { AppSettings } from '../core/settings/index';
@@ -269,6 +270,9 @@ async function boot(): Promise<void> {
       const result = await dialog.showSaveDialog({ defaultPath: defaultName });
       return result.canceled || !result.filePath ? null : result.filePath;
     },
+    prepareReleaseDiff: (localDir: string) => prepareReleaseDiff(localDir),
+    createReleaseZip: (repoRoot: string, files: string[], savePath: string) =>
+      createReleaseZip(repoRoot, files, savePath),
   });
 
   createWindow();

@@ -28,6 +28,7 @@ import { normalizeThemeSetting, THEME_SETTINGS, type ThemeSetting } from '../cor
 import { applyTheme } from './theme';
 import type {
   AppSettings,
+  PrepareReleaseDiffResult,
   PrepareSyncResult,
   QueueStatus,
   SaveProfileOptions,
@@ -36,6 +37,7 @@ import type {
 import { DEFAULT_SETTINGS } from '../core/settings/index';
 import { createDiffView, diffOrientationLabels } from './diff-view';
 import { createSyncPlanView } from './sync-view';
+import { createReleaseDialogView } from './release-view';
 import { buildUploadRequests, buildRequestsFromDropTargets } from './bulk-transfer';
 import { attachDropZone } from './dnd';
 import {
@@ -167,6 +169,7 @@ export function mountApp(root: string | HTMLElement): void {
   const syncPlanPanel = h('div', { class: 'diffwrap_1' });
   const queuePanel = h('div', { class: 'queue_1' });
   const historyPanel = h('div', { class: 'history_wrap_1' });
+  const releaseOverlay = h('div', { class: 'release_1_overlay', hidden: true });
 
   function setStatus(msg: string, isError = false): void {
     statusBar.textContent = msg;
@@ -1208,8 +1211,55 @@ export function mountApp(root: string | HTMLElement): void {
       h('button', { class: 'btn_1', onclick: () => void enqueueSync(remoteIn.value.trim(), opts()) }, [
         'キューで同期',
       ]),
+      h('button', { class: 'btn_1', onclick: () => void openReleaseDialog() }, [
+        '差分納品ファイル抽出...',
+      ]),
       syncPlanPanel,
     );
+  }
+
+  // ---- 差分納品ファイル抽出 ---------------------------------------------------
+  function closeReleaseDialog(): void {
+    releaseOverlay.hidden = true;
+    releaseOverlay.replaceChildren();
+  }
+
+  function showReleaseDialog(result: PrepareReleaseDiffResult): void {
+    releaseOverlay.replaceChildren();
+    releaseOverlay.append(
+      createReleaseDialogView(result, {
+        labels: {
+          noChanges: '変更なし',
+          deletedWarning: '以下のファイルはリモート側で手動削除が必要です',
+          createZip: 'zip作成',
+          cancel: 'キャンセル',
+        },
+        onCreateZip: (files) => void createReleaseZipNow(result.repoRoot, files),
+        onCancel: () => closeReleaseDialog(),
+      }),
+    );
+    releaseOverlay.hidden = false;
+  }
+
+  async function openReleaseDialog(): Promise<void> {
+    if (!state.syncLocalDir) {
+      setStatus('ローカルフォルダが必要です', true);
+      return;
+    }
+    const result = await guard('差分納品ファイル抽出（プレビュー）', () =>
+      api.prepareReleaseDiff(state.syncLocalDir as string),
+    );
+    if (result) showReleaseDialog(result);
+  }
+
+  async function createReleaseZipNow(repoRoot: string, files: string[]): Promise<void> {
+    const savePath = await api.pickSavePath('release.zip');
+    if (!savePath) return;
+    const r = await guard('zip作成', () => api.createReleaseZip(repoRoot, files, savePath));
+    if (r) {
+      setStatus(`zip作成: 完了 (${r.fileCount}件 → ${r.savePath})`);
+      closeReleaseDialog();
+    }
   }
 
   async function pickSyncDir(): Promise<void> {
@@ -1500,6 +1550,7 @@ export function mountApp(root: string | HTMLElement): void {
       ]),
     ]),
     statusBar,
+    releaseOverlay,
   );
 
   attachDropZone(remotePanel, handleOsDrop);

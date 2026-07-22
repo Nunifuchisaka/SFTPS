@@ -61,6 +61,7 @@ function makeHarness(options: {
   service?: Partial<IpcService>;
   runTask?: (id: string) => Promise<void>;
   maxCompletedTasks?: number;
+  deps?: Partial<IpcHandlerDeps>;
 } = {}): Harness {
   const { service, calls } = makeService(options.service ?? {});
   const history = new HistoryStore();
@@ -104,6 +105,9 @@ function makeHarness(options: {
     pickFile: async () => null,
     pickDirectory: async () => null,
     pickSavePath: async () => null,
+    prepareReleaseDiff: async () => ({ repoRoot: '/repo', files: [], deletedFiles: [] }),
+    createReleaseZip: async () => undefined,
+    ...options.deps,
   };
 
   const harness: Harness = {
@@ -356,5 +360,37 @@ describe('profile and settings handlers', () => {
     const h = makeHarness();
     await expect(h.handlers.isDirectory('/home/u/dir')).resolves.toBe(true);
     await expect(h.handlers.isDirectory('/home/u/a.txt')).resolves.toBe(false);
+  });
+});
+
+describe('release diff extraction handlers', () => {
+  it('delegates prepareReleaseDiff to the deps and returns its result', async () => {
+    const h = makeHarness({
+      deps: {
+        prepareReleaseDiff: async (localDir) => {
+          expect(localDir).toBe('/local/dir');
+          return { repoRoot: '/repo', files: ['a.ts'], deletedFiles: ['old.ts'] };
+        },
+      },
+    });
+    await expect(h.handlers.prepareReleaseDiff('/local/dir')).resolves.toEqual({
+      repoRoot: '/repo',
+      files: ['a.ts'],
+      deletedFiles: ['old.ts'],
+    });
+  });
+
+  it('delegates createReleaseZip to the deps with the given repo root, files and save path', async () => {
+    const calls: Array<{ repoRoot: string; files: string[]; savePath: string }> = [];
+    const h = makeHarness({
+      deps: {
+        createReleaseZip: async (repoRoot, files, savePath) => {
+          calls.push({ repoRoot, files, savePath });
+        },
+      },
+    });
+    const result = await h.handlers.createReleaseZip('/repo', ['a.ts', 'b.ts'], '/tmp/release.zip');
+    expect(calls).toEqual([{ repoRoot: '/repo', files: ['a.ts', 'b.ts'], savePath: '/tmp/release.zip' }]);
+    expect(result).toEqual({ savePath: '/tmp/release.zip', fileCount: 2 });
   });
 });

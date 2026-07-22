@@ -504,6 +504,63 @@ textarea.form_1__input {
   font-family: ui-monospace, Consolas, monospace;
 }
 
+.release_1_overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 100;
+}
+
+.release_1 {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+  min-width: 360px;
+  max-width: 560px;
+  max-height: 80vh;
+  overflow: auto;
+}
+
+.release_1__list {
+  list-style: none;
+  margin: 6px 0;
+  padding: 0;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.release_1__item {
+  padding: 2px 0;
+}
+
+.release_1__empty {
+  color: var(--muted);
+  padding: 8px 0;
+}
+
+.release_1__deleted {
+  margin-top: 12px;
+}
+
+.release_1__deletedlist {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  max-height: 120px;
+  overflow: auto;
+}
+
+.release_1__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
 .status_1.is_error {
   color: var(--removed);
 }
