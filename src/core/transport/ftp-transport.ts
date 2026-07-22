@@ -19,6 +19,7 @@ export interface FtpClientLike {
   downloadTo(destination: NodeJS.WritableStream, fromRemotePath: string): Promise<unknown>;
   uploadFrom(source: NodeJS.ReadableStream, toRemotePath: string): Promise<unknown>;
   remove(path: string): Promise<unknown>;
+  removeDir(remoteDirPath: string): Promise<unknown>;
   ensureDir(remoteDirPath: string): Promise<unknown>;
   rename(path: string, newPath: string): Promise<unknown>;
 }
@@ -75,8 +76,21 @@ export class FtpTransport implements RemoteTransport {
     }
   }
 
+  /**
+   * FTP の DELE はファイル専用のため、失敗時はディレクトリとみなして
+   * removeDir（再帰削除）へフォールバックする。両方失敗した場合は
+   * 元の DELE のエラーを投げる（存在しないパス等の原因を保つ）。
+   */
   async delete(remotePath: string): Promise<void> {
-    await this.client.remove(remotePath);
+    try {
+      await this.client.remove(remotePath);
+    } catch (removeErr) {
+      try {
+        await this.client.removeDir(remotePath);
+      } catch {
+        throw removeErr;
+      }
+    }
   }
 
   async mkdir(remotePath: string): Promise<void> {

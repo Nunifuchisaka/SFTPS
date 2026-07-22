@@ -37,9 +37,19 @@ class FakeFtpClient implements FtpClientLike {
     this.files.set(to, Buffer.concat(chunks));
     return {};
   }
+  /** DELE 相当。ファイル以外（ディレクトリ）は実サーバー同様 550 で失敗する。 */
+  dirs = new Set<string>();
+  removedDirs: string[] = [];
   async remove(path: string): Promise<unknown> {
+    if (this.dirs.has(path)) throw new Error('550 Not a plain file');
     this.removed.push(path);
     this.files.delete(path);
+    return {};
+  }
+  async removeDir(path: string): Promise<unknown> {
+    if (!this.dirs.has(path)) throw new Error('550 No such directory');
+    this.removedDirs.push(path);
+    this.dirs.delete(path);
     return {};
   }
   async ensureDir(path: string): Promise<unknown> {
@@ -109,6 +119,24 @@ describe('FtpTransport', () => {
     await t.mkdir('/pub/new');
     expect(fake.removed).toEqual(['/pub/x.txt']);
     expect(fake.ensured).toEqual(['/pub/new']);
+  });
+
+  it('delete falls back to removeDir for directories (DELE is file-only)', async () => {
+    const fake = new FakeFtpClient();
+    fake.dirs.add('/pub/images');
+    const t = new FtpTransport(fake);
+    await t.delete('/pub/images');
+    expect(fake.removedDirs).toEqual(['/pub/images']);
+    expect(fake.removed).toEqual([]);
+  });
+
+  it('delete rethrows the original DELE error when the path is neither file nor dir', async () => {
+    const fake = new FakeFtpClient();
+    fake.remove = async () => {
+      throw new Error('550 No such file');
+    };
+    const t = new FtpTransport(fake);
+    await expect(t.delete('/pub/missing')).rejects.toThrow('550 No such file');
   });
 
   it('rename calls the client rename with from/to', async () => {

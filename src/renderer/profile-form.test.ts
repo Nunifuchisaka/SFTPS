@@ -5,6 +5,7 @@ import {
   buildProfileFromForm,
   buildClearSecretsFromForm,
   emptyFormValues,
+  suggestFtpPort,
 } from './profile-form';
 
 const ftp: FtpProfile = {
@@ -119,5 +120,22 @@ describe('S3 default credential chain opt-in', () => {
   it('never leaks the opt-in into non-s3 profiles', () => {
     const p = buildProfileFromForm({ ...profileToFormValues(ftp), useDefaultCredentials: true });
     expect(p).not.toHaveProperty('useDefaultCredentials');
+  });
+});
+
+describe('suggestFtpPort', () => {
+  it('switches 21 to 990 when moving to implicit FTPS', () => {
+    expect(suggestFtpPort(21, 'explicit', 'implicit')).toBe(990);
+    expect(suggestFtpPort(21, 'none', 'implicit')).toBe(990);
+  });
+
+  it('switches 990 back to 21 when leaving implicit FTPS', () => {
+    expect(suggestFtpPort(990, 'implicit', 'explicit')).toBe(21);
+    expect(suggestFtpPort(990, 'implicit', 'none')).toBe(21);
+  });
+
+  it('keeps a user-customized port untouched', () => {
+    expect(suggestFtpPort(2121, 'explicit', 'implicit')).toBe(2121);
+    expect(suggestFtpPort(9990, 'implicit', 'none')).toBe(9990);
   });
 });

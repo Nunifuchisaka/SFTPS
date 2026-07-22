@@ -1,4 +1,4 @@
-import type { Profile, Protocol, SecretKey } from '../core/profile/index';
+import type { FtpSecurity, Profile, Protocol, SecretKey } from '../core/profile/index';
 import type { RemoteEntry } from '../core/transport/index';
 import type { BackupInfo } from '../core/backup/index';
 // ガード関数は純粋モジュールから直接読む（BackupManager 等の node:fs 依存をレンダラへ持ち込まないため）。
@@ -43,6 +43,7 @@ import {
   buildClearSecretsFromForm,
   profileToFormValues,
   emptyFormValues,
+  suggestFtpPort,
   type FormValues,
 } from './profile-form';
 
@@ -276,6 +277,16 @@ export function mountApp(root: string | HTMLElement): void {
       ['implicit', 'FTPS 暗黙 (implicit)'],
       ['none', '平文 FTP（非推奨）'],
     ]);
+    // TLS モード切替時、標準ポートのままなら 21⇔990 を自動で切り替える。
+    let prevFtpSec = ftpSecIn.value as FtpSecurity;
+    ftpSecIn.addEventListener('change', () => {
+      const next = ftpSecIn.value as FtpSecurity;
+      const current = Number(portIn.value);
+      if (Number.isInteger(current)) {
+        portIn.value = String(suggestFtpPort(current, prevFtpSec, next));
+      }
+      prevFtpSec = next;
+    });
     const hostKeyIn = select(fv.hostKeyPolicy, [
       ['tofu', 'ホスト鍵: TOFU（初回信頼）'],
       ['strict', 'ホスト鍵: strict（既知のみ）'],

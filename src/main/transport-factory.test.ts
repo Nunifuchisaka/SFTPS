@@ -21,17 +21,21 @@ const s3Profile: S3Profile = {
   id: 'a', name: 's3', protocol: 's3', region: 'ap-northeast-1', bucket: 'my-bucket', accessKeyId: 'AKIA',
 };
 
-function makeDeps(): { deps: TransportFactoryDeps; s3Configs: unknown[] } {
+function makeDeps(): { deps: TransportFactoryDeps; s3Configs: unknown[]; ftpTimeouts: Array<number | undefined> } {
   const s3Configs: unknown[] = [];
+  const ftpTimeouts: Array<number | undefined> = [];
   const deps: TransportFactoryDeps = {
-    createFtpClient: () => ({}) as unknown as FtpClientLike,
+    createFtpClient: (connectTimeoutMs) => {
+      ftpTimeouts.push(connectTimeoutMs);
+      return {} as unknown as FtpClientLike;
+    },
     createSftpClient: () => ({}) as unknown as SftpClientLike,
     createS3Client: (config) => {
       s3Configs.push(config);
       return {} as unknown as S3ClientLike;
     },
   };
-  return { deps, s3Configs };
+  return { deps, s3Configs, ftpTimeouts };
 }
 
 describe('config builders', () => {
@@ -52,15 +56,20 @@ describe('config builders', () => {
   });
 
   it('maps connectTimeoutMs to each library option', () => {
-    expect(buildFtpAccessOptions({ ...ftpProfile, connectTimeoutMs: 12000 }, {}).timeout).toBe(12000);
     const sftpCfg = buildSftpConnectConfig({ ...sftpProfile, connectTimeoutMs: 12000 }, {}) as Record<string, unknown>;
     expect(sftpCfg.readyTimeout).toBe(12000);
     const s3Cfg = buildS3ClientConfig({ ...s3Profile, connectTimeoutMs: 12000 }, { secretAccessKey: 'sk' });
     expect(s3Cfg.requestHandler).toEqual({ connectionTimeout: 12000, requestTimeout: 12000 });
   });
 
+  // basic-ftp の AccessOptions に timeout は存在しない（入れても黙って無視される）。
+  // タイムアウトは createFtpClient のコンストラクタ引数として渡す。
+  it('never puts a timeout into the FTP access options', () => {
+    const opts = buildFtpAccessOptions({ ...ftpProfile, connectTimeoutMs: 12000 }, {}) as Record<string, unknown>;
+    expect('timeout' in opts).toBe(false);
+  });
+
   it('omits timeout options when connectTimeoutMs is unset', () => {
-    expect('timeout' in buildFtpAccessOptions(ftpProfile, {})).toBe(false);
     expect('readyTimeout' in buildSftpConnectConfig(sftpProfile, {})).toBe(false);
     expect(buildS3ClientConfig(s3Profile, { secretAccessKey: 'sk' }).requestHandler).toBeUndefined();
   });
@@ -108,6 +117,13 @@ describe('createTransport', () => {
   it('returns an FtpTransport for ftp profiles', () => {
     const { deps } = makeDeps();
     expect(createTransport(ftpProfile, { password: 'pw' }, deps)).toBeInstanceOf(FtpTransport);
+  });
+
+  it('passes connectTimeoutMs to the FTP client constructor (not the access options)', () => {
+    const { deps, ftpTimeouts } = makeDeps();
+    createTransport({ ...ftpProfile, connectTimeoutMs: 12000 }, { password: 'pw' }, deps);
+    createTransport(ftpProfile, { password: 'pw' }, deps);
+    expect(ftpTimeouts).toEqual([12000, undefined]);
   });
 
   it('returns an SftpTransport for sftp profiles', () => {

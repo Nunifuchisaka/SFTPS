@@ -39,6 +39,22 @@ export interface FormValues {
   clearSecrets: SecretKey[];
 }
 
+/** FTP の TLS モードごとの標準ポート（none/explicit=21, implicit=990）。 */
+export const FTP_DEFAULT_PORTS: Record<FtpSecurity, number> = {
+  none: 21,
+  explicit: 21,
+  implicit: 990,
+};
+
+/**
+ * TLS モード切替時のポート自動補正（純粋関数）。
+ * 切替前モードの標準ポートのままなら切替後の標準ポートを返し、
+ * 利用者が手で変えたポートはそのまま維持する。
+ */
+export function suggestFtpPort(current: number, from: FtpSecurity, to: FtpSecurity): number {
+  return current === FTP_DEFAULT_PORTS[from] ? FTP_DEFAULT_PORTS[to] : current;
+}
+
 /** 新規作成用の既定フォーム値（安全側の既定: ftpSecurity=explicit, hostKeyPolicy=tofu）。 */
 export function emptyFormValues(): FormValues {
   return {

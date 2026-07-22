@@ -38,7 +38,11 @@ export interface S3ClientConfig {
 
 /** プロトコルごとの実クライアント生成を差し替え可能にするための依存注入口。 */
 export interface TransportFactoryDeps {
-  createFtpClient(): FtpClientLike;
+  /**
+   * basic-ftp はタイムアウトを access() オプションではなく Client の
+   * コンストラクタで受け取るため、生成時に渡す（未指定ならライブラリ既定の 30 秒）。
+   */
+  createFtpClient(connectTimeoutMs?: number): FtpClientLike;
   createSftpClient(): SftpClientLike;
   createS3Client(config: S3ClientConfig): S3ClientLike;
   /** SFTP プロファイルに対するホスト鍵検証関数を生成する（未指定なら検証なし）。 */
@@ -59,22 +63,15 @@ function toBasicFtpSecure(mode: FtpSecurity): boolean | 'implicit' {
 
 /** basic-ftp の access() へ渡す接続オプションを組み立てる。 */
 export function buildFtpAccessOptions(profile: FtpProfile, secrets: Secrets) {
-  const options: {
-    host: string;
-    port: number;
-    user: string;
-    password: string;
-    secure: boolean | 'implicit';
-    timeout?: number;
-  } = {
+  // タイムアウトはここには含めない（basic-ftp の AccessOptions に timeout は
+  // 存在せず黙って無視される。createFtpClient のコンストラクタ引数で渡す）。
+  return {
     host: profile.host,
     port: profile.port,
     user: profile.user,
     password: secrets.password ?? '',
     secure: toBasicFtpSecure(resolveFtpSecurity(profile)),
   };
-  if (profile.connectTimeoutMs !== undefined) options.timeout = profile.connectTimeoutMs;
-  return options;
 }
 
 /** ssh2-sftp-client の connect() へ渡す設定を組み立てる。 */
@@ -121,7 +118,7 @@ export function buildS3ClientConfig(profile: S3Profile, secrets: Secrets): S3Cli
  * この境界で `as unknown as` によって吸収する。
  */
 export const defaultTransportDeps: TransportFactoryDeps = {
-  createFtpClient: () => new ftp.Client() as unknown as FtpClientLike,
+  createFtpClient: (connectTimeoutMs) => new ftp.Client(connectTimeoutMs) as unknown as FtpClientLike,
   createSftpClient: () => new SftpClient() as unknown as SftpClientLike,
   createS3Client: (config) => new S3Client(config) as unknown as S3ClientLike,
 };
@@ -137,7 +134,10 @@ export function createTransport(
 ): RemoteTransport {
   switch (profile.protocol) {
     case 'ftp':
-      return new FtpTransport(deps.createFtpClient(), buildFtpAccessOptions(profile, secrets));
+      return new FtpTransport(
+        deps.createFtpClient(profile.connectTimeoutMs),
+        buildFtpAccessOptions(profile, secrets),
+      );
     case 'sftp': {
       const hostVerifier = deps.makeSftpHostVerifier?.(profile);
       return new SftpTransport(
