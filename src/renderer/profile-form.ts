@@ -5,6 +5,7 @@ import {
   type Protocol,
   type SecretKey,
 } from '../core/profile/index';
+import type { ProfileDefaults } from '../core/env/index';
 
 /** プロトコルごとに保持しうるシークレット項目。 */
 export const SECRET_KEYS_BY_PROTOCOL: Record<Protocol, SecretKey[]> = {
@@ -78,6 +79,28 @@ export function emptyFormValues(): FormValues {
     autoReconnect: false,
     clearSecrets: [],
   };
+}
+
+/**
+ * 開発用デフォルト値（.env、機密情報を含まない）を新規作成フォームの初期値へ適用する。
+ * defaults が null、または各項目が未設定の場合はそのフィールドを変更しない。
+ * ProfileDefaults にシークレットフィールドは存在しないため、シークレット欄は常に無傷。
+ */
+export function applyProfileDefaults(fv: FormValues, defaults: ProfileDefaults | null): FormValues {
+  if (!defaults) return fv;
+  const next = { ...fv };
+  if (defaults.protocol !== undefined) next.protocol = defaults.protocol;
+  if (defaults.host !== undefined) next.host = defaults.host;
+  if (defaults.port !== undefined) next.port = defaults.port;
+  if (defaults.user !== undefined) next.user = defaults.user;
+  if (defaults.ftpSecurity !== undefined) next.ftpSecurity = defaults.ftpSecurity;
+  if (defaults.hostKeyPolicy !== undefined) next.hostKeyPolicy = defaults.hostKeyPolicy;
+  if (defaults.region !== undefined) next.region = defaults.region;
+  if (defaults.bucket !== undefined) next.bucket = defaults.bucket;
+  if (defaults.accessKeyId !== undefined) next.accessKeyId = defaults.accessKeyId;
+  if (defaults.connectTimeoutMs !== undefined) next.connectTimeoutMs = String(defaults.connectTimeoutMs);
+  if (defaults.autoReconnect !== undefined) next.autoReconnect = defaults.autoReconnect;
+  return next;
 }
 
 /**

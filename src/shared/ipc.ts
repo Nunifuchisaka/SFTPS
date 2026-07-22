@@ -1,4 +1,5 @@
 import type { Profile, SecretKey } from '../core/profile/index';
+import type { ProfileDefaults } from '../core/env/index';
 import type { RemoteEntry } from '../core/transport/index';
 import type { UploadPreview, CommitResult } from '../core/upload/index';
 import type { DownloadPreview, DownloadResult } from '../core/download/index';
@@ -10,7 +11,7 @@ import type { Bookmark, BookmarkInput } from '../core/bookmark/index';
 import type { KnownHostEntry } from '../core/hostkey/index';
 import type { AppSettings } from '../core/settings/index';
 
-export type { AppSettings };
+export type { AppSettings, ProfileDefaults };
 
 export interface DeleteProfileOptions {
   /** ブックマーク・履歴・ホスト鍵も削除するか（ユーザーの明示同意）。 */
@@ -100,6 +101,7 @@ export const IPC = {
   listProfiles: 'profiles:list',
   saveProfile: 'profiles:save',
   deleteProfile: 'profiles:delete',
+  getProfileDefaults: 'profiles:defaults',
   testConnection: 'conn:test',
   listRemote: 'remote:list',
   prepareUpload: 'upload:prepare',
@@ -150,6 +152,11 @@ export interface FunabinFtpApi {
    * バックアップは、それぞれ options の明示指定がある場合のみ削除する。
    */
   deleteProfile(id: string, options?: DeleteProfileOptions): Promise<DeleteProfileResult>;
+  /**
+   * 開発用デフォルト値（.env、機密情報を含まない）。プロファイルが未存在の場合は null。
+   * 新規作成フォームの初期値プリセットにのみ使う（保存は必ずユーザー操作経由）。
+   */
+  getProfileDefaults(): Promise<ProfileDefaults | null>;
   testConnection(id: string): Promise<ConnectionResult>;
   listRemote(id: string, remoteDir: string): Promise<RemoteEntry[]>;
   prepareUpload(id: string, localPath: string, remotePath: string): Promise<UploadPreview>;

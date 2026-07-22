@@ -30,6 +30,7 @@ import type {
   AppSettings,
   PrepareReleaseDiffResult,
   PrepareSyncResult,
+  ProfileDefaults,
   QueueStatus,
   SaveProfileOptions,
   SyncFolderOptions,
@@ -45,6 +46,7 @@ import {
   buildClearSecretsFromForm,
   profileToFormValues,
   emptyFormValues,
+  applyProfileDefaults,
   suggestFtpPort,
   type FormValues,
 } from './profile-form';
@@ -104,6 +106,8 @@ interface State {
   bookmarkName: string;
   knownHosts: KnownHostEntry[];
   settings: AppSettings;
+  /** 開発用デフォルト値（.env、機密情報を含まない）。新規作成フォームの初期値プリセットにのみ使う。 */
+  profileDefaults: ProfileDefaults | null;
 }
 
 export function mountApp(root: string | HTMLElement): void {
@@ -135,6 +139,7 @@ export function mountApp(root: string | HTMLElement): void {
     bookmarkName: '',
     knownHosts: [],
     settings: DEFAULT_SETTINGS,
+    profileDefaults: null,
   };
 
   let bookmarkSeq = 0;
@@ -238,7 +243,9 @@ export function mountApp(root: string | HTMLElement): void {
 
   function renderProfileForm(): HTMLElement {
     const editing = state.editing;
-    const fv: FormValues = editing ? profileToFormValues(editing) : emptyFormValues();
+    const fv: FormValues = editing
+      ? profileToFormValues(editing)
+      : applyProfileDefaults(emptyFormValues(), state.profileDefaults);
 
     const form = h('form', { class: 'form_1' });
     const proto = h('select', { class: 'form_1__input' }, [
@@ -1562,6 +1569,7 @@ export function mountApp(root: string | HTMLElement): void {
       secretWarn.textContent =
         'このOSでは安全な暗号化ストレージ（safeStorage）が利用できません。シークレットを含むプロファイルは保存できません。';
     }
+    state.profileDefaults = await api.getProfileDefaults();
     const home = await api.homeDir();
     await loadLocal(home);
     await refreshProfiles();

@@ -1,4 +1,5 @@
 import type { Profile } from '../../core/profile/index';
+import type { ProfileDefaults } from '../../core/env/index';
 import type { RemoteEntry } from '../../core/transport/index';
 import type { UploadPreview, CommitResult } from '../../core/upload/index';
 import type { DownloadPreview, DownloadResult } from '../../core/download/index';
@@ -111,6 +112,8 @@ export interface IpcHandlerDeps {
   pickFile(): Promise<string | null>;
   pickDirectory(): Promise<string | null>;
   pickSavePath(defaultName: string): Promise<string | null>;
+  /** 開発用デフォルト値（.env、機密情報を含まない）。boot 時に一度だけ読み込んだ値をそのまま返す。 */
+  getProfileDefaults(): ProfileDefaults | null;
   prepareReleaseDiff(localDir: string): Promise<PrepareReleaseDiffResult>;
   createReleaseZip(repoRoot: string, files: string[], savePath: string): Promise<void>;
   /** id 生成に使う時刻（テストで固定するため注入可能）。 */
@@ -236,6 +239,7 @@ export function createIpcHandlers(deps: IpcHandlerDeps) {
       deps.service.saveProfile(input, options),
     deleteProfile: (id: string, options?: DeleteProfileOptions) =>
       deps.service.deleteProfile(id, options),
+    getProfileDefaults: (): ProfileDefaults | null => deps.getProfileDefaults(),
     getSettings: (): AppSettings => deps.settings.get(),
     saveSettings: (input: unknown): Promise<AppSettings> => deps.settings.save(input),
 

@@ -102,6 +102,7 @@ function makeHarness(options: {
     isDirectory: async (p) => p.endsWith('/dir'),
     homeDir: () => '/home/u',
     isSecretStorageAvailable: () => true,
+    getProfileDefaults: () => null,
     pickFile: async () => null,
     pickDirectory: async () => null,
     pickSavePath: async () => null,
@@ -360,6 +361,14 @@ describe('profile and settings handlers', () => {
     const h = makeHarness();
     await expect(h.handlers.isDirectory('/home/u/dir')).resolves.toBe(true);
     await expect(h.handlers.isDirectory('/home/u/a.txt')).resolves.toBe(false);
+  });
+
+  it('returns the dev-default profile values (or null) from the deps', () => {
+    const withDefaults = makeHarness({ deps: { getProfileDefaults: () => ({ host: 'example.com' }) } });
+    expect(withDefaults.handlers.getProfileDefaults()).toEqual({ host: 'example.com' });
+
+    const withoutDefaults = makeHarness();
+    expect(withoutDefaults.handlers.getProfileDefaults()).toBeNull();
   });
 });
 

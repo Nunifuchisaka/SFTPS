@@ -5,6 +5,7 @@ import {
   buildProfileFromForm,
   buildClearSecretsFromForm,
   emptyFormValues,
+  applyProfileDefaults,
   suggestFtpPort,
 } from './profile-form';
 
@@ -120,6 +121,53 @@ describe('S3 default credential chain opt-in', () => {
   it('never leaks the opt-in into non-s3 profiles', () => {
     const p = buildProfileFromForm({ ...profileToFormValues(ftp), useDefaultCredentials: true });
     expect(p).not.toHaveProperty('useDefaultCredentials');
+  });
+});
+
+describe('applyProfileDefaults', () => {
+  it('returns the form unchanged when defaults is null', () => {
+    expect(applyProfileDefaults(emptyFormValues(), null)).toEqual(emptyFormValues());
+  });
+
+  it('fills host/port/user/protocol from defaults', () => {
+    const fv = applyProfileDefaults(emptyFormValues(), {
+      protocol: 'sftp',
+      host: 'example.com',
+      port: 22,
+      user: 'someuser',
+      hostKeyPolicy: 'strict',
+    });
+    expect(fv.protocol).toBe('sftp');
+    expect(fv.host).toBe('example.com');
+    expect(fv.port).toBe(22);
+    expect(fv.user).toBe('someuser');
+    expect(fv.hostKeyPolicy).toBe('strict');
+  });
+
+  it('never touches secret fields (they are not present in ProfileDefaults)', () => {
+    const fv = applyProfileDefaults(emptyFormValues(), { host: 'example.com' });
+    expect(fv.password).toBe('');
+    expect(fv.privateKey).toBe('');
+    expect(fv.passphrase).toBe('');
+    expect(fv.secretAccessKey).toBe('');
+  });
+
+  it('fills s3 fields (region/bucket/accessKeyId)', () => {
+    const fv = applyProfileDefaults(emptyFormValues(), {
+      protocol: 's3',
+      region: 'ap-northeast-1',
+      bucket: 'my-bucket',
+      accessKeyId: 'AKIA',
+    });
+    expect(fv.region).toBe('ap-northeast-1');
+    expect(fv.bucket).toBe('my-bucket');
+    expect(fv.accessKeyId).toBe('AKIA');
+  });
+
+  it('fills connectTimeoutMs and autoReconnect', () => {
+    const fv = applyProfileDefaults(emptyFormValues(), { connectTimeoutMs: 5000, autoReconnect: true });
+    expect(fv.connectTimeoutMs).toBe('5000');
+    expect(fv.autoReconnect).toBe(true);
   });
 });
 

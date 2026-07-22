@@ -42,6 +42,7 @@ export function registerIpc(deps: IpcHandlerDeps): IpcHandlers {
   ipcMain.handle(IPC.deleteProfile, (_e, id: string, options?: DeleteProfileOptions) =>
     h.deleteProfile(id, options),
   );
+  ipcMain.handle(IPC.getProfileDefaults, () => h.getProfileDefaults());
   ipcMain.handle(IPC.getSettings, () => h.getSettings());
   ipcMain.handle(IPC.saveSettings, (_e, settings: unknown) => h.saveSettings(settings));
 

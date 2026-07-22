@@ -23,6 +23,7 @@ import { BookmarkFile } from './bookmark-store';
 import { SettingsFile } from './settings-store';
 import { SettingsController } from './settings-controller';
 import { TerminalTaskRecorder } from './history-recorder';
+import { loadProfileDefaults } from './dev-defaults';
 import { listLocalDir, isLocalDirectory } from './local-fs';
 import { prepareReleaseDiff, createReleaseZip } from './git-release';
 import { registerIpc, type HistoryController } from './ipc/register';
@@ -221,6 +222,8 @@ async function boot(): Promise<void> {
   const userData = app.getPath('userData');
   const knownHosts = await openKnownHosts(t);
   const history = await createHistoryController(t);
+  // 開発用デフォルト値（機密情報は含まない）。プロジェクトルートの .env（任意）から読む。
+  const profileDefaults = await loadProfileDefaults(join(app.getAppPath(), '.env'));
 
   const settingsFile = new SettingsFile(join(userData, 'settings.json'));
   const initial = await settingsFile.load();
@@ -258,6 +261,7 @@ async function boot(): Promise<void> {
     isDirectory: (p) => isLocalDirectory(p),
     homeDir: () => homedir(),
     isSecretStorageAvailable: () => safeStorage.isEncryptionAvailable(),
+    getProfileDefaults: () => profileDefaults,
     pickFile: async () => {
       const result = await dialog.showOpenDialog({ properties: ['openFile'] });
       return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0];
