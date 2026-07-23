@@ -358,6 +358,60 @@ describe('AppService', () => {
     expect(await transport.exists('/canceled/a.txt')).toBe(false);
   });
 
+  it('commitDownloadSync downloads new/changed remote files into a local folder with backups', async () => {
+    await service.saveProfile(ftpProfile);
+    await transport.connect();
+    await transport.writeFile('/site/a.txt', Buffer.from('NEWDATA'));
+    await transport.writeFile('/site/sub/b.txt', Buffer.from('bb'));
+    const destDir = join(dir, 'localdest');
+    await writeLocal(join(destDir, 'a.txt'), Buffer.from('OLD'));
+
+    const r = await service.commitDownloadSync('p1', '/site', destDir, { compareBy: 'size' });
+    expect((await readFile(join(destDir, 'a.txt'), 'utf8'))).toBe('NEWDATA');
+    expect((await readFile(join(destDir, 'sub', 'b.txt'), 'utf8'))).toBe('bb');
+    expect(r.result.uploaded).toBe(2);
+    // overwrite of the existing local a.txt was backed up
+    const backups = await service.listBackups('p1', '/a.txt');
+    expect(backups).toHaveLength(1);
+  });
+
+  it('commitDownloadSync mirror-deletes extraneous local files (with backup) when deleteExtraneous is on', async () => {
+    await service.saveProfile(ftpProfile);
+    await transport.connect();
+    await transport.writeFile('/site/a.txt', Buffer.from('a'));
+    const destDir = join(dir, 'mirrordest');
+    await writeLocal(join(destDir, 'gone.txt'), Buffer.from('LOST'));
+
+    const r = await service.commitDownloadSync('p1', '/site', destDir, {
+      compareBy: 'size',
+      deleteExtraneous: true,
+    });
+    expect(r.result.deleted).toBe(1);
+    expect(existsSync(join(destDir, 'gone.txt'))).toBe(false);
+    const backups = await service.listBackups('p1', '/gone.txt');
+    expect(backups).toHaveLength(1);
+  });
+
+  it('commitDownloadSync stops without transferring when the signal is already aborted', async () => {
+    await service.saveProfile(ftpProfile);
+    await transport.connect();
+    await transport.writeFile('/canceldl/a.txt', Buffer.from('a'));
+    const destDir = join(dir, 'canceldldest');
+
+    const controller = new AbortController();
+    controller.abort();
+    const r = await service.commitDownloadSync(
+      'p1',
+      '/canceldl',
+      destDir,
+      { compareBy: 'size' },
+      controller.signal,
+    );
+    expect(r.result.canceled).toBe(true);
+    expect(r.result.uploaded).toBe(0);
+    expect(existsSync(join(destDir, 'a.txt'))).toBe(false);
+  });
+
   it('renameRemote moves a remote file', async () => {
     await service.saveProfile(ftpProfile);
     await transport.connect();

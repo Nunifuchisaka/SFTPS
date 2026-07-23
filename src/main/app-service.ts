@@ -289,6 +289,45 @@ export class AppService {
     }, signal);
   }
 
+  /**
+   * リモートディレクトリをローカルフォルダへ差分ダウンロードする（commitSync の逆方向）。
+   * source/dest を入れ替えるだけで core/sync の planner/runner をそのまま再利用できる
+   * （walkTree/planSync/runSync はどちら向きの RemoteTransport にも依存しない設計のため）。
+   */
+  async commitDownloadSync(
+    id: string,
+    remoteDir: string,
+    localDir: string,
+    options: SyncFolderOptions = {},
+    signal?: AbortSignal,
+  ): Promise<CommitSyncResult> {
+    if (signal?.aborted) {
+      return {
+        result: { uploaded: 0, createdDirs: 0, skipped: 0, deleted: 0, backups: [], canceled: true },
+        summary: summarizePlan([]),
+      };
+    }
+
+    return this.withTransport(id, async (source) => {
+      const computeHash = options.compareBy === 'checksum';
+      const dest = await this.openLocalSource(localDir);
+      const sourceEntries = await this.safeWalk(source, remoteDir, options.ignore, computeHash);
+      const destEntries = await walkTree(dest, '/', { ignore: options.ignore, computeHash });
+      const plan = planSync(sourceEntries, destEntries, {
+        compareBy: options.compareBy,
+        deleteExtraneous: options.deleteExtraneous,
+      });
+      const result = await runSync(source, dest, plan, {
+        backupManager: this.deps.backupManager,
+        profileId: id,
+        sourceBase: remoteDir,
+        destBase: '/',
+        ...(signal ? { signal } : {}),
+      });
+      return { result, summary: summarizePlan(plan) };
+    }, signal);
+  }
+
   private async openLocalSource(localDir: string): Promise<LocalTransport> {
     const source = new LocalTransport(localDir);
     await source.connect();

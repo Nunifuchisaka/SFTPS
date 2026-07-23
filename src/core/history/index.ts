@@ -1,6 +1,13 @@
 import { SECRET_KEYS } from '../profile/index';
 
-export type HistoryKind = 'upload' | 'download' | 'sync' | 'rename' | 'delete' | 'chmod';
+export type HistoryKind =
+  | 'upload'
+  | 'download'
+  | 'sync'
+  | 'download-sync'
+  | 'rename'
+  | 'delete'
+  | 'chmod';
 export type HistoryStatus = 'success' | 'failed';
 
 export interface HistoryEntry {

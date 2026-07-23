@@ -57,6 +57,14 @@ export type TransferRequest =
       remoteDir: string;
       options?: SyncFolderOptions;
       label?: string;
+    }
+  | {
+      kind: 'download-sync';
+      profileId: string;
+      remoteDir: string;
+      localDir: string;
+      options?: SyncFolderOptions;
+      label?: string;
     };
 
 export interface QueueStatus {

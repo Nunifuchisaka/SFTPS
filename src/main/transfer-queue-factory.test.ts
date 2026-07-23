@@ -23,15 +23,23 @@ describe('createAppTransferQueue', () => {
           summary: { upload: 0, createDir: 0, skip: 0, deleteExtra: 0 },
         };
       },
+      commitDownloadSync: async (id, remoteDir, localDir) => {
+        calls.push(`download-sync ${id} ${remoteDir} ${localDir}`);
+        return {
+          result: { uploaded: 0, createdDirs: 0, skipped: 0, deleted: 0, backups: [], canceled: false },
+          summary: { upload: 0, createDir: 0, skip: 0, deleteExtra: 0 },
+        };
+      },
     };
 
     const q = createAppTransferQueue(service, { retry: noRetry, concurrency: 1 });
     q.add({ id: '1', kind: 'upload', payload: { kind: 'upload', profileId: 'p', localPath: '/l', remotePath: '/r' } });
     q.add({ id: '2', kind: 'download', payload: { kind: 'download', profileId: 'p', remotePath: '/r', savePath: '/s' } });
     q.add({ id: '3', kind: 'sync', payload: { kind: 'sync', profileId: 'p', localDir: '/ld', remoteDir: '/rd' } });
+    q.add({ id: '4', kind: 'download-sync', payload: { kind: 'download-sync', profileId: 'p', remoteDir: '/rd', localDir: '/ld' } });
     await q.run();
 
-    expect(calls).toEqual(['upload p /l /r', 'download p /r /s', 'sync p /ld /rd']);
+    expect(calls).toEqual(['upload p /l /r', 'download p /r /s', 'sync p /ld /rd', 'download-sync p /rd /ld']);
     expect(q.list().every((t) => t.status === 'succeeded')).toBe(true);
   });
 
@@ -53,15 +61,23 @@ describe('createAppTransferQueue', () => {
           summary: { upload: 0, createDir: 0, skip: 0, deleteExtra: 0 },
         };
       },
+      commitDownloadSync: async (_id, _remoteDir, _localDir, _options, signal) => {
+        signals.push(signal);
+        return {
+          result: { uploaded: 0, createdDirs: 0, skipped: 0, deleted: 0, backups: [], canceled: false },
+          summary: { upload: 0, createDir: 0, skip: 0, deleteExtra: 0 },
+        };
+      },
     };
 
     const q = createAppTransferQueue(service, { retry: noRetry, concurrency: 1 });
     q.add({ id: '1', kind: 'upload', payload: { kind: 'upload', profileId: 'p', localPath: '/l', remotePath: '/r' } });
     q.add({ id: '2', kind: 'download', payload: { kind: 'download', profileId: 'p', remotePath: '/r', savePath: '/s' } });
     q.add({ id: '3', kind: 'sync', payload: { kind: 'sync', profileId: 'p', localDir: '/ld', remoteDir: '/rd' } });
+    q.add({ id: '4', kind: 'download-sync', payload: { kind: 'download-sync', profileId: 'p', remoteDir: '/rd', localDir: '/ld' } });
     await q.run();
 
-    expect(signals).toHaveLength(3);
+    expect(signals).toHaveLength(4);
     expect(signals.every((s) => s instanceof AbortSignal)).toBe(true);
   });
 

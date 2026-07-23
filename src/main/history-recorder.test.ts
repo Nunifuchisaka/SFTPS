@@ -53,6 +53,18 @@ describe('taskToHistoryInput', () => {
     expect(input?.kind).toBe('sync');
   });
 
+  it('uses the remote dir as the path for download-sync tasks', () => {
+    const input = taskToHistoryInput(
+      task({
+        kind: 'download-sync',
+        status: 'succeeded',
+        payload: { kind: 'download-sync', profileId: 'p1', remoteDir: '/pub/site', localDir: '/l' },
+      }),
+    );
+    expect(input?.path).toBe('/pub/site');
+    expect(input?.kind).toBe('download-sync');
+  });
+
   it('returns null for non-terminal tasks', () => {
     expect(
       taskToHistoryInput(

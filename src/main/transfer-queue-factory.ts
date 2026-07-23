@@ -31,6 +31,13 @@ export interface QueueableService {
     options?: SyncFolderOptions,
     signal?: AbortSignal,
   ): Promise<CommitSyncResult>;
+  commitDownloadSync(
+    id: string,
+    remoteDir: string,
+    localDir: string,
+    options?: SyncFolderOptions,
+    signal?: AbortSignal,
+  ): Promise<CommitSyncResult>;
 }
 
 export interface AppTransferQueueOptions {
@@ -87,6 +94,15 @@ export function createAppTransferQueue(
             request.profileId,
             request.localDir,
             request.remoteDir,
+            request.options,
+            ctx.signal,
+          );
+          break;
+        case 'download-sync':
+          await service.commitDownloadSync(
+            request.profileId,
+            request.remoteDir,
+            request.localDir,
             request.options,
             ctx.signal,
           );

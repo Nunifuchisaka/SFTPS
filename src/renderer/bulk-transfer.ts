@@ -1,5 +1,5 @@
 import type { TransferRequest } from '../shared/ipc';
-import type { DropTarget } from '../core/browse/index';
+import type { DropTarget, DownloadDropTarget } from '../core/browse/index';
 
 function baseName(p: string): string {
   const trimmed = p.replace(/[\\/]+$/, '');
@@ -50,6 +50,30 @@ export function buildRequestsFromDropTargets(
           localDir: t.sourcePath,
           remoteDir: t.destPath,
           label: `sync → ${t.destPath}`,
+        },
+  );
+}
+
+/** リモートからのダウンロードドロップ解決結果（DownloadDropTarget[]）を転送要求群に変換する。 */
+export function buildDownloadRequestsFromTargets(
+  profileId: string,
+  targets: DownloadDropTarget[],
+): TransferRequest[] {
+  return targets.map((t) =>
+    t.kind === 'download'
+      ? {
+          kind: 'download',
+          profileId,
+          remotePath: t.sourcePath,
+          savePath: t.destPath,
+          label: baseName(t.sourcePath),
+        }
+      : {
+          kind: 'download-sync',
+          profileId,
+          remoteDir: t.sourcePath,
+          localDir: t.destPath,
+          label: `download → ${t.destPath}`,
         },
   );
 }

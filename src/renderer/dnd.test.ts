@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect } from 'vitest';
-import { attachDropZone } from './dnd';
+import { attachDropZone, attachInternalDropZone } from './dnd';
 
 describe('attachDropZone', () => {
   it('calls onDrop with the dropped files and prevents default', () => {
@@ -12,7 +12,7 @@ describe('attachDropZone', () => {
 
     const fakeFiles = { length: 2, 0: { name: 'a.txt' }, 1: { name: 'b.txt' } } as unknown as FileList;
     const ev = new Event('drop', { bubbles: true, cancelable: true });
-    (ev as unknown as { dataTransfer: unknown }).dataTransfer = { files: fakeFiles };
+    (ev as unknown as { dataTransfer: unknown }).dataTransfer = { types: ['Files'], files: fakeFiles };
 
     const notCanceled = el.dispatchEvent(ev);
     expect(notCanceled).toBe(false); // preventDefault was called
@@ -71,5 +71,74 @@ describe('attachDropZone', () => {
     attachDropZone(el, () => {});
     el.dispatchEvent(dragEvent('dragenter', ['text/plain']));
     expect(el.classList.contains('is_dragover')).toBe(false);
+  });
+});
+
+describe('attachInternalDropZone', () => {
+  const MIME = 'application/x-funabinftp-test-entries';
+
+  function internalDragEvent(type: string, types: string[] | null, data = ''): Event {
+    const ev = new Event(type, { bubbles: true, cancelable: true });
+    if (types !== null) {
+      (ev as unknown as { dataTransfer: unknown }).dataTransfer = {
+        types,
+        getData: (t: string) => (t === MIME ? data : ''),
+      };
+    }
+    return ev;
+  }
+
+  it('calls onDrop with the payload for the matching mime type and prevents default', () => {
+    const el = document.createElement('div');
+    let received: string | null = null;
+    attachInternalDropZone(el, MIME, (data) => {
+      received = data;
+    });
+
+    const notCanceled = el.dispatchEvent(internalDragEvent('drop', [MIME], '[{"path":"/a"}]'));
+    expect(notCanceled).toBe(false);
+    expect(received).toBe('[{"path":"/a"}]');
+  });
+
+  it('ignores drops that do not carry the matching mime type', () => {
+    const el = document.createElement('div');
+    let called = false;
+    attachInternalDropZone(el, MIME, () => {
+      called = true;
+    });
+    el.dispatchEvent(internalDragEvent('drop', ['Files']));
+    expect(called).toBe(false);
+  });
+
+  it('adds and removes the highlight class around dragenter/drop', () => {
+    const el = document.createElement('div');
+    attachInternalDropZone(el, MIME, () => {});
+    el.dispatchEvent(internalDragEvent('dragenter', [MIME]));
+    expect(el.classList.contains('is_dragover')).toBe(true);
+    el.dispatchEvent(internalDragEvent('drop', [MIME], '[]'));
+    expect(el.classList.contains('is_dragover')).toBe(false);
+  });
+
+  it('does not react to an unrelated mime type on dragenter', () => {
+    const el = document.createElement('div');
+    attachInternalDropZone(el, MIME, () => {});
+    el.dispatchEvent(internalDragEvent('dragenter', ['Files']));
+    expect(el.classList.contains('is_dragover')).toBe(false);
+  });
+
+  it('coexists with attachDropZone on the same element without cross-triggering', () => {
+    const el = document.createElement('div');
+    let osDropCalled = false;
+    let internalDropCalled = false;
+    attachDropZone(el, () => {
+      osDropCalled = true;
+    });
+    attachInternalDropZone(el, MIME, () => {
+      internalDropCalled = true;
+    });
+
+    el.dispatchEvent(internalDragEvent('drop', [MIME], '[]'));
+    expect(internalDropCalled).toBe(true);
+    expect(osDropCalled).toBe(false);
   });
 });

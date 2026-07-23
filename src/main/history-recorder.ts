@@ -11,7 +11,7 @@ export function taskToHistoryInput(task: TransferTask): HistoryInput | null {
 
   const request = task.payload as TransferRequest;
   const path =
-    request.kind === 'sync'
+    request.kind === 'sync' || request.kind === 'download-sync'
       ? request.remoteDir
       : request.remotePath;
 

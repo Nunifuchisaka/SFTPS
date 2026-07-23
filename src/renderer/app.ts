@@ -12,6 +12,8 @@ import {
   pruneSelection,
   classifyDroppedPaths,
   resolveDropTargets,
+  resolveDownloadTargets,
+  type DragEntry,
   type SortKey,
   type SortDir,
 } from '../core/browse/index';
@@ -39,8 +41,12 @@ import { DEFAULT_SETTINGS } from '../core/settings/index';
 import { createDiffView, diffOrientationLabels } from './diff-view';
 import { createSyncPlanView } from './sync-view';
 import { createReleaseDialogView } from './release-view';
-import { buildUploadRequests, buildRequestsFromDropTargets } from './bulk-transfer';
-import { attachDropZone } from './dnd';
+import {
+  buildUploadRequests,
+  buildRequestsFromDropTargets,
+  buildDownloadRequestsFromTargets,
+} from './bulk-transfer';
+import { attachDropZone, attachInternalDropZone, LOCAL_DRAG_MIME, REMOTE_DRAG_MIME } from './dnd';
 import {
   buildProfileFromForm,
   buildClearSecretsFromForm,
@@ -619,7 +625,7 @@ export function mountApp(root: string | HTMLElement): void {
     });
 
     localPanel.append(
-      h('h2', {}, [t('browser.local')]),
+      h('h2', {}, [t('browser.localDropHint')]),
       h('div', { class: 'browser_1__path' }, [state.localDir || '(未選択)']),
       h('div', { class: 'browser_1__tools' }, [
         h('button', { class: 'btn_1', onclick: () => void loadLocal(parentDir(state.localDir)) }, [t('btn.up')]),
@@ -668,7 +674,24 @@ export function mountApp(root: string | HTMLElement): void {
         ),
       );
       const selected = e.type === 'file' && e.path === state.selectedLocal;
-      list.append(h('li', { class: `list_1__item${selected ? ' is_active' : ''}` }, children));
+      list.append(
+        h(
+          'li',
+          {
+            class: `list_1__item${selected ? ' is_active' : ''}`,
+            draggable: true,
+            ondragstart: (ev: DragEvent) => {
+              const entries: DragEntry[] =
+                e.type === 'file' && state.localSelection.has(e.path)
+                  ? [...state.localSelection].map((p) => ({ path: p, type: 'file' as const }))
+                  : [{ path: e.path, type: e.type }];
+              ev.dataTransfer?.setData(LOCAL_DRAG_MIME, JSON.stringify(entries));
+              if (ev.dataTransfer) ev.dataTransfer.effectAllowed = 'copy';
+            },
+          },
+          children,
+        ),
+      );
     }
     localPanel.append(list);
     localPanel.append(
@@ -813,7 +836,24 @@ export function mountApp(root: string | HTMLElement): void {
       children.push(h('button', { class: 'btn_1', onclick: () => void doDelete(e) }, [t('btn.delete')]));
 
       const selected = e.type === 'file' && e.path === state.selectedRemote;
-      list.append(h('li', { class: `list_1__item${selected ? ' is_active' : ''}` }, children));
+      list.append(
+        h(
+          'li',
+          {
+            class: `list_1__item${selected ? ' is_active' : ''}`,
+            draggable: true,
+            ondragstart: (ev: DragEvent) => {
+              const entries: DragEntry[] =
+                e.type === 'file' && state.remoteSelection.has(e.path)
+                  ? [...state.remoteSelection].map((p) => ({ path: p, type: 'file' as const }))
+                  : [{ path: e.path, type: e.type }];
+              ev.dataTransfer?.setData(REMOTE_DRAG_MIME, JSON.stringify(entries));
+              if (ev.dataTransfer) ev.dataTransfer.effectAllowed = 'copy';
+            },
+          },
+          children,
+        ),
+      );
     }
     remotePanel.append(list);
     remotePanel.append(
@@ -986,6 +1026,44 @@ export function mountApp(root: string | HTMLElement): void {
       for (const req of requests) await api.enqueueTransfer(req);
       setStatus(`${requests.length}件をドロップからキューに追加しました`);
       await refreshQueue();
+    })();
+  }
+
+  /** ローカル一覧の行をリモートパネルへドロップ（アプリ内D&D）→アップロード/フォルダ同期をキューへ。 */
+  function handleInternalUploadDrop(data: string): void {
+    const profileId = state.currentProfileId;
+    if (!profileId) {
+      setStatus('先にプロファイルへ接続してください', true);
+      return;
+    }
+    const entries = JSON.parse(data) as DragEntry[];
+    if (entries.length === 0) return;
+    const items = entries.map((e) => ({ path: e.path, isDirectory: e.type === 'dir' }));
+    const targets = resolveDropTargets(items, state.remoteDir);
+    const requests = buildRequestsFromDropTargets(profileId, targets);
+    void (async () => {
+      for (const req of requests) await api.enqueueTransfer(req);
+      setStatus(`${requests.length}件をドロップからキューに追加しました`);
+      await refreshQueue();
+    })();
+  }
+
+  /** リモート一覧の行をローカルパネルへドロップ（アプリ内D&D）→ダウンロード/フォルダ再帰DLをキューへ。 */
+  function handleInternalDownloadDrop(data: string): void {
+    const profileId = state.currentProfileId;
+    if (!profileId) {
+      setStatus('先にプロファイルへ接続してください', true);
+      return;
+    }
+    const entries = JSON.parse(data) as DragEntry[];
+    if (entries.length === 0) return;
+    const targets = resolveDownloadTargets(entries, state.localDir);
+    const requests = buildDownloadRequestsFromTargets(profileId, targets);
+    void (async () => {
+      for (const req of requests) await api.enqueueTransfer(req);
+      setStatus(`${requests.length}件をドロップからダウンロードキューに追加しました`);
+      await refreshQueue();
+      await loadLocal(state.localDir);
     })();
   }
 
@@ -1453,7 +1531,7 @@ export function mountApp(root: string | HTMLElement): void {
 
     const kindSel = h('select', { class: 'form_1__input' }, [
       h('option', { value: '' }, ['種別: すべて']),
-      ...(['upload', 'download', 'sync', 'rename', 'delete', 'chmod'] as HistoryKind[]).map((k) =>
+      ...(['upload', 'download', 'sync', 'download-sync', 'rename', 'delete', 'chmod'] as HistoryKind[]).map((k) =>
         h('option', { value: k }, [k]),
       ),
     ]) as HTMLSelectElement;
@@ -1547,7 +1625,7 @@ export function mountApp(root: string | HTMLElement): void {
     secretWarn,
     h('main', { class: 'layout_1' }, [
       h('section', { class: 'layout_1__col' }, [profilePanel, knownHostsPanel, settingsPanel]),
-      h('section', { class: 'layout_1__col' }, [localPanel, remotePanel]),
+      h('section', { class: 'browsers_1' }, [localPanel, remotePanel]),
       h('section', { class: 'layout_1__col' }, [
         transferPanel,
         syncPanel,
@@ -1561,6 +1639,8 @@ export function mountApp(root: string | HTMLElement): void {
   );
 
   attachDropZone(remotePanel, handleOsDrop);
+  attachInternalDropZone(remotePanel, LOCAL_DRAG_MIME, handleInternalUploadDrop);
+  attachInternalDropZone(localPanel, REMOTE_DRAG_MIME, handleInternalDownloadDrop);
 
   void (async () => {
     const available = await api.isSecretStorageAvailable();

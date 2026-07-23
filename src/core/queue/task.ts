@@ -1,4 +1,4 @@
-export type TaskKind = 'upload' | 'download' | 'sync';
+export type TaskKind = 'upload' | 'download' | 'sync' | 'download-sync';
 
 export type TaskStatus =
   | 'queued'

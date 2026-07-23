@@ -13,3 +13,8 @@ export {
   type DroppedItem,
   type DropTarget,
 } from './drop';
+export {
+  resolveDownloadTargets,
+  type DragEntry,
+  type DownloadDropTarget,
+} from './download-drop';
