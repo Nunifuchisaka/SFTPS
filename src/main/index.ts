@@ -2,33 +2,16 @@ import { app, BrowserWindow, dialog, safeStorage } from 'electron';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { BackupManager } from '../core/backup/index';
-import {
-  buildHostKeyPrompt,
-  createHostVerifier,
-  isPromptConsent,
-  sha256Fingerprint,
-} from '../core/hostkey/index';
+import { buildHostKeyPrompt, isPromptConsent } from '../core/hostkey/index';
 import { isAllowedNavigation, type NavigationPolicy } from '../core/security/index';
 import { createTranslator, dictionaries, LOCALES, resolveLocale } from '../core/i18n/index';
-import { AppService } from './app-service';
-import { ProfileStore } from './profile-store';
-import { SecretStore } from './secret-store';
-import { createTransport, defaultTransportDeps, type TransportFactoryDeps } from './transport-factory';
-import { KnownHostsFile, KnownHostsLoadError } from './known-hosts-store';
-import { KnownHostsController } from './known-hosts-controller';
+import { createAppServices } from './bootstrap';
+import { KnownHostsLoadError } from './known-hosts-store';
 import { createAppTransferQueue } from './transfer-queue-factory';
-import { HistoryFile } from './history-store';
-import { BookmarkFile } from './bookmark-store';
-import { SettingsFile } from './settings-store';
-import { SettingsController } from './settings-controller';
 import { TerminalTaskRecorder } from './history-recorder';
-import { loadProfileDefaults } from './dev-defaults';
 import { listLocalDir, isLocalDirectory } from './local-fs';
 import { prepareReleaseDiff, createReleaseZip } from './git-release';
-import { registerIpc, type HistoryController } from './ipc/register';
-import type { HistoryStore, HistoryFilter, HistoryInput } from '../core/history/index';
-import type { AppSettings } from '../core/settings/index';
+import { registerIpc } from './ipc/register';
 
 type Translate = (key: string, params?: Record<string, string | number>) => string;
 
@@ -49,65 +32,6 @@ function fatal(t: Translate, file: string, err: unknown): never {
   dialog.showErrorBox(t('store.loadFailed', { file }), err instanceof Error ? err.message : String(err));
   app.exit(1);
   throw err;
-}
-
-async function openKnownHosts(t: Translate): Promise<KnownHostsController> {
-  const file = new KnownHostsFile(join(app.getPath('userData'), 'known_hosts.json'));
-  try {
-    return new KnownHostsController(file, await file.load());
-  } catch (err) {
-    // 破損・権限エラーを「信頼済みゼロ」として扱うとピン留めが実質バイパスされる。
-    if (err instanceof KnownHostsLoadError) fatal(t, 'known_hosts.json', err.cause);
-    throw err;
-  }
-}
-
-interface ServiceParts {
-  backupManager: BackupManager;
-  history: MainHistoryController;
-  settings: () => AppSettings;
-}
-
-function createService(
-  t: Translate,
-  knownHosts: KnownHostsController,
-  parts: ServiceParts,
-): AppService {
-  const userData = app.getPath('userData');
-
-  const deps: TransportFactoryDeps = {
-    ...defaultTransportDeps,
-    makeSftpHostVerifier: (profile) =>
-      createHostVerifier({
-        host: profile.host,
-        port: profile.port,
-        policy: profile.hostKeyPolicy ?? 'tofu',
-        fingerprintOf: sha256Fingerprint,
-        verify: (h, p, fp) => knownHosts.verify(h, p, fp),
-        knownFingerprintOf: (h, p) => knownHosts.lookup(h, p),
-        // 未知の鍵は SHA256 指紋を提示し、明示同意を得るまで受理しない。
-        confirm: (request) => askHostKey(t, request),
-        onAccept: (h, p, fp) => {
-          knownHosts.trust(h, p, fp).catch((err: unknown) => {
-            reportStoreError(t, 'known_hosts.json', err);
-          });
-        },
-        onReject: (request) => {
-          if (request.verdict === 'mismatch') warnHostKeyMismatch(t, request);
-        },
-      }),
-  };
-
-  return new AppService({
-    profileStore: new ProfileStore(join(userData, 'profiles.json')),
-    secretStore: new SecretStore({ safeStorage, filePath: join(userData, 'secrets.json') }),
-    backupManager: parts.backupManager,
-    bookmarkStore: new BookmarkFile(join(userData, 'bookmarks.json')),
-    createTransport: (profile, secrets) => createTransport(profile, secrets, deps),
-    historyStore: parts.history,
-    knownHosts,
-    settings: parts.settings,
-  });
 }
 
 type PromptRequest = Parameters<typeof buildHostKeyPrompt>[0];
@@ -140,35 +64,6 @@ async function askHostKey(t: Translate, request: PromptRequest): Promise<boolean
 function warnHostKeyMismatch(t: Translate, request: PromptRequest): void {
   const content = buildHostKeyPrompt(request, t);
   dialog.showErrorBox(content.message, content.detail);
-}
-
-/** IPC 用の履歴口に、プロファイル削除時の掃除（removeByProfile）を足したもの。 */
-interface MainHistoryController extends HistoryController {
-  removeByProfile(profileId: string): number;
-}
-
-async function createHistoryController(t: Translate): Promise<MainHistoryController> {
-  const historyFile = new HistoryFile(join(app.getPath('userData'), 'history.json'));
-  const history: HistoryStore = await historyFile.load();
-  const save = (): void => {
-    historyFile.save(history).catch((err: unknown) => reportStoreError(t, 'history.json', err));
-  };
-  return {
-    append: (input: HistoryInput) => {
-      history.append(input);
-      save();
-    },
-    list: (filter?: HistoryFilter) => history.list(filter),
-    clear: () => {
-      history.clear();
-      save();
-    },
-    removeByProfile: (profileId: string) => {
-      const removed = history.removeByProfile(profileId);
-      if (removed > 0) save();
-      return removed;
-    },
-  };
 }
 
 function navigationPolicy(): NavigationPolicy {
@@ -219,31 +114,28 @@ function createWindow(): void {
 /** 永続層・サービス・キュー・IPC を組み立てて画面を開く。 */
 async function boot(): Promise<void> {
   const t = createMainTranslator();
-  const userData = app.getPath('userData');
-  const knownHosts = await openKnownHosts(t);
-  const history = await createHistoryController(t);
-  // 開発用デフォルト値（機密情報は含まない）。プロジェクトルートの .env（任意）から読む。
-  const profileDefaults = await loadProfileDefaults(join(app.getAppPath(), '.env'));
 
-  const settingsFile = new SettingsFile(join(userData, 'settings.json'));
-  const initial = await settingsFile.load();
-  const backupManager = new BackupManager({
-    backupRoot: join(userData, 'backups'),
-    maxGenerations: initial.backup.maxGenerations,
-    maxAgeDays: initial.backup.maxAgeDays,
-  });
-  const settings = new SettingsController(settingsFile, initial, (next) => {
-    backupManager.setRetention(next.backup);
-    // 保持期間を縮めた設定は、既存の（もう触られない）バックアップにも効かせる。
-    backupManager.pruneExpired().catch((err: unknown) => reportStoreError(t, 'backups', err));
-  });
-  settings.applyNow();
+  let services: Awaited<ReturnType<typeof createAppServices>>;
+  try {
+    services = await createAppServices({
+      userData: app.getPath('userData'),
+      safeStorage,
+      // 開発用デフォルト値（機密情報は含まない）。プロジェクトルートの .env（任意）から読む。
+      appEnvPath: join(app.getAppPath(), '.env'),
+      // 未知の鍵は SHA256 指紋を提示し、明示同意を得るまで受理しない。
+      confirmHostKey: (request) => askHostKey(t, request),
+      onHostKeyRejected: (request) => {
+        if (request.verdict === 'mismatch') warnHostKeyMismatch(t, request);
+      },
+      reportStoreError: (file, err) => reportStoreError(t, file, err),
+    });
+  } catch (err) {
+    // 破損・権限エラーを「信頼済みゼロ」として扱うとピン留めが実質バイパスされる。
+    if (err instanceof KnownHostsLoadError) fatal(t, 'known_hosts.json', err.cause);
+    throw err;
+  }
+  const { service, knownHosts, history, settings, profileDefaults } = services;
 
-  const service = createService(t, knownHosts, {
-    backupManager,
-    history,
-    settings: () => settings.get(),
-  });
   // 終端タスクの履歴記録はキューの保持上限より先に走らせる（破棄前に記録する）。
   const recorder = new TerminalTaskRecorder((input) => history.append(input));
   const queue = createAppTransferQueue(service, {

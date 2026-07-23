@@ -12,6 +12,7 @@
     "dev": "electron-vite dev",
     "start": "electron-vite preview",
     "build": "electron-vite build",
+    "build:mcp": "node scripts/build-mcp.mjs",
     "dist": "electron-vite build && electron-builder",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -19,15 +20,18 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1090.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "basic-ftp": "^6.0.1",
     "diff": "^9.0.0",
-    "ssh2-sftp-client": "^12.1.1"
+    "ssh2-sftp-client": "^12.1.1",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
     "electron": "^43.1.1",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
+    "esbuild": "^0.25.12",
     "jsdom": "^29.1.1",
     "typescript": "^7.0.2",
     "vite": "^7.3.6",

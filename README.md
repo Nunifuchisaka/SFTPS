@@ -59,6 +59,7 @@ npm run typecheck  # tsc --noEmit で型チェック
 
 ```sh
 npm run build      # メイン / プリロード / レンダラを out/ へバンドル（electron-vite）
+npm run build:mcp  # MCP サーバーを out/mcp-server/index.mjs へバンドル（esbuild、下記参照）
 npm run start      # ビルド済みアプリをプレビュー起動（electron-vite preview）
 npm run dist       # electron-builder でインストーラを生成（下記参照）
 ```
@@ -71,6 +72,62 @@ npm run dist       # electron-builder でインストーラを生成（下記参
 - **Windows**: nsis インストーラ（x64）
 
 Windows 上では Windows ターゲットのみ実ビルド可能です。macOS ターゲットは設定のみで、実際の dmg 生成は macOS 上で行ってください。生成物は `release/` に出力されます（`--dir` を付けるとインストーラを作らずアプリディレクトリのみ生成できます）。
+
+## MCP サーバー
+
+Claude Code や Codex CLI のような AI コーディングエージェントから、このアプリが管理する FTP / FTPS / SFTP / S3 接続を直接操作できるようにする MCP（Model Context Protocol）サーバーを同梱しています（`src/mcp-server/`）。GUI とは独立した**ヘッドレスな Electron メインプロセス**として動作し、標準入出力（stdio）で JSON-RPC 通信します。プロファイル・シークレット・バックアップ・転送履歴・信頼済みホスト鍵は GUI と同じ `userData` 配下のファイルを共有します（キャッシュや別データベースは持ちません）。
+
+### ビルド
+
+```sh
+npm run build:mcp
+```
+
+`out/mcp-server/index.mjs` に単一ファイルとしてバンドルされます（esbuild、`electron` 本体や `basic-ftp` 等の実パッケージは外部化）。
+
+### 登録方法
+
+**重要**: `command` は必ず Electron 本体（`node_modules/.bin/electron`）を指定してください。`node` では `safeStorage`（OS 資格情報暗号化）が使えず起動できません。同様に `ELECTRON_RUN_AS_NODE=1` を設定した状態で起動することも避けてください（同じ理由で `electron` の import 自体が壊れます）。
+
+Claude Code（`.mcp.json`、リポジトリのパスは適宜書き換えてください）:
+
+```json
+{
+  "mcpServers": {
+    "funabinftp": {
+      "command": "/absolute/path/to/FunabinFTP/node_modules/.bin/electron",
+      "args": ["/absolute/path/to/FunabinFTP/out/mcp-server/index.mjs"]
+    }
+  }
+}
+```
+
+Codex CLI（`~/.codex/config.toml`）:
+
+```toml
+[mcp_servers.funabinftp]
+command = "/absolute/path/to/FunabinFTP/node_modules/.bin/electron"
+args = ["/absolute/path/to/FunabinFTP/out/mcp-server/index.mjs"]
+```
+
+### 提供ツール
+
+- **プロファイル管理**: `list_profiles` / `save_profile` / `delete_profile`
+  - `save_profile` はシークレット項目（`password` / `privateKey` / `passphrase` / `secretAccessKey` / `sessionToken`）を省略すると既存値を据え置きます（GUI と同じ挙動）。明示的に削除したい項目のみ `clearSecrets` に列挙してください
+- **接続・閲覧**: `test_connection` / `list_remote`
+- **転送**（プレビューとコミットを別ツールに分離）: `preview_upload` / `upload`、`preview_download` / `download`、`preview_sync` / `sync`、`rename_remote` / `delete_remote` / `chmod_remote`
+- **バックアップ**: `list_backups` / `restore_backup`
+- **ホスト鍵信頼**: `trust_host_key` / `remove_host_key` / `list_known_hosts`
+
+### SFTP ホスト鍵のフェイルクローズと信頼フロー
+
+MCP サーバーには指紋確認ダイアログがないため、未知の SFTP ホスト鍵は**常に自動拒否**します（GUI の TOFU 同意ダイアログに相当する確認手段が無い以上、無言で受理しないフェイルクローズ）。`test_connection` や `list_remote` 等の接続系ツールがホスト鍵拒否で失敗すると、エラーメッセージに `trust_host_key` の呼び出しにそのまま使えるフィンガープリント情報が含まれるので、それを使って明示的に信頼してから再実行してください。
+
+鍵が変更されていた場合（`mismatch`。サーバー再構築や MITM の疑い）は、安全のため `trust_host_key` 単体では絶対に上書きできません。先に `remove_host_key` を呼んでから、新しい指紋で `trust_host_key` を呼ぶ 2 段階の操作が必須です。
+
+### 履歴記録の扱い
+
+MCP 経由の `upload` / `download` / `sync` は GUI の転送キューを経由しないため、結果を直接転送履歴へ記録します。GUI の「転送履歴」画面から MCP 経由の操作も確認できます。
 
 ## セキュリティ設計
 
@@ -115,7 +172,8 @@ src/
     reconnect/           再接続方針・エラー分類（認証/ホスト鍵/証明書/一過性）・接続確立（純粋）
     security/            遷移許可判定（既定拒否・ホワイトリスト）（純粋）
   main/                Electron メインプロセス
-    index.ts             ウィンドウ生成・ライフサイクル・DI 結線・単一インスタンス・遷移制御
+    index.ts             ウィンドウ生成・ライフサイクル・単一インスタンス・遷移制御（bootstrap を呼ぶ薄い層）
+    bootstrap.ts          GUI/MCP 共通の DI 組み立て（createAppServices）
     app-service.ts       IPC ハンドラの実体（純粋・テスト可能）
     atomic-write.ts      temp+rename・mode 0600 の共通アトミック書き込み
     secret-store.ts      safeStorage による暗号化保管
@@ -128,6 +186,14 @@ src/
     transport-factory.ts 実クライアント → アダプタの結線
     ipc/handlers.ts      IPC ハンドラの実体（ipcMain 非依存・テスト可能）
     ipc/register.ts      ipcMain.handle への薄い結線
+  mcp-server/          ヘッドレス Electron プロセスとして動く MCP サーバー（AI エージェント向け）
+    index.ts             エントリポイント（app.whenReady() → bootstrap → stdio 起動）
+    server.ts             McpServer 組み立て・全ツール登録
+    errors.ts              HostKeyTrustRequiredError（trust_host_key 誘導つきエラー整形）
+    host-key-bridge.ts      ホスト鍵拒否イベントの一時保持・接続エラーの整形し直し
+    history-bridge.ts       upload/download/sync の結果を転送履歴へ記録する橋渡し
+    tools/                各ツールのハンドラ（profiles/connection/transfer/backups/host-keys）
+    schemas/profile.ts      Profile 判別共用体の zod スキーマ（構造検証。業務ルールは core/profile 側）
   preload/             contextBridge による window.api 公開
   renderer/            素の TypeScript + Vite の UI
     diff-view.ts         差分セグメント → DOM 生成（純粋）

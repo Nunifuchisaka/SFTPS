@@ -318,19 +318,24 @@ export class AppService {
     );
   }
 
-  /** リモートファイルをローカルへダウンロードする（上書き前に既存ローカルをバックアップ）。 */
+  /**
+   * リモートファイルをローカルへダウンロードする（上書き前に既存ローカルをバックアップ）。
+   * options は signal の後ろに置く（既存呼び出し元が signal を第4引数で渡しているため、
+   * 位置を保ったまま任意の verifyAfterTransfer を追加できるようにする）。
+   */
   async download(
     id: string,
     remotePath: string,
     savePath: string,
     signal?: AbortSignal,
+    options: { verifyAfterTransfer?: boolean } = {},
   ): Promise<DownloadResult> {
     throwIfAborted(signal);
     const { local, localPath } = await this.openLocalTarget(savePath);
     return this.withTransport(
       id,
       (remote) =>
-        coreCommitDownload(remote, local, this.deps.backupManager, id, remotePath, localPath),
+        coreCommitDownload(remote, local, this.deps.backupManager, id, remotePath, localPath, options),
       signal,
     );
   }

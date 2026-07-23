@@ -404,6 +404,15 @@ describe('AppService', () => {
     expect(result.verified).toBe(true);
   });
 
+  it('download passes verifyAfterTransfer through to the core', async () => {
+    await service.saveProfile(ftpProfile);
+    await transport.connect();
+    await transport.writeFile('/vv.txt', Buffer.from('checkme', 'utf8'));
+    const savePath = join(localDir, 'vv.txt');
+    const result = await service.download('p1', '/vv.txt', savePath, undefined, { verifyAfterTransfer: true });
+    expect(result.verified).toBe(true);
+  });
+
   it('download writes the remote file to a local path', async () => {
     await service.saveProfile(ftpProfile);
     await transport.connect();
