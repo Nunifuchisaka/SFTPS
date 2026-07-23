@@ -514,6 +514,11 @@ textarea.form_1__input {
   z-index: 100;
 }
 
+/* display: flex がUAの [hidden] { display: none } を上書きしてしまうため明示的に打ち消す */
+.release_1_overlay[hidden] {
+  display: none;
+}
+
 .release_1 {
   background: var(--panel);
   border: 1px solid var(--line);
