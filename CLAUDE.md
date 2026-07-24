@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+常に日本語で応答する。
+
 ## プロジェクト概要
 
 FunabinFTP は FTP / FTPS / SFTP / Amazon S3 に対応したクロスプラットフォーム（Windows / macOS）の Electron 製デスクトップ FTP クライアント。`electron-vite` でメイン・プリロード・レンダラの 3 ビルドを管理する TypeScript プロジェクト。
