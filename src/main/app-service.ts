@@ -18,6 +18,15 @@ import {
   type Profile,
 } from '../core/profile/index';
 import { planProfileDeletion } from '../core/profile/deletion';
+import {
+  isValidFolderId,
+  moveProfileToFolder,
+  reorderFolders,
+  removeFolderAssignment,
+  sortFolders,
+  validateProfileFolder,
+  type ProfileFolder,
+} from '../core/profile-folder/index';
 import type { KnownHostEntry } from '../core/hostkey/index';
 import { DEFAULT_SETTINGS, type AppSettings } from '../core/settings/index';
 import {
@@ -66,6 +75,23 @@ export interface BookmarkGateway {
   save(store: BookmarkStore): Promise<void>;
 }
 
+/** プロファイルのフォルダ分けの読み書き口（実体は JSON ファイル永続化）。 */
+export interface ProfileFolderGateway {
+  list(): Promise<ProfileFolder[]>;
+  saveAll(folders: ProfileFolder[]): Promise<void>;
+}
+
+/** 未指定時のフォールバック（フォルダ機能を使わない呼び出し元・既存テストを壊さないため）。 */
+class InMemoryProfileFolderStore implements ProfileFolderGateway {
+  private folders: ProfileFolder[] = [];
+  async list(): Promise<ProfileFolder[]> {
+    return this.folders.map((f) => ({ ...f }));
+  }
+  async saveAll(folders: ProfileFolder[]): Promise<void> {
+    this.folders = folders.map((f) => ({ ...f }));
+  }
+}
+
 /** 履歴のうち、プロファイル削除時の掃除に必要な操作だけを表す構造型。 */
 export interface HistoryGateway {
   removeByProfile(profileId: string): number;
@@ -82,6 +108,8 @@ export interface AppServiceDeps {
   secretStore: SecretStore;
   backupManager: BackupManager;
   bookmarkStore: BookmarkGateway;
+  /** プロファイルのフォルダ分け（未指定時はプロセス内メモリのみで保持し、永続化しない）。 */
+  profileFolderStore?: ProfileFolderGateway;
   createTransport: (profile: Profile, secrets: Secrets) => RemoteTransport;
   /** 転送履歴（プロファイル削除時の掃除に使う。未指定なら履歴は掃除しない）。 */
   historyStore?: HistoryGateway;
@@ -98,7 +126,11 @@ export type { DeleteProfileOptions, DeleteProfileResult };
  * Electron / ipcMain には依存せず、単体テスト可能な形で全機能を提供する。
  */
 export class AppService {
-  constructor(private readonly deps: AppServiceDeps) {}
+  private readonly profileFolderStore: ProfileFolderGateway;
+
+  constructor(private readonly deps: AppServiceDeps) {
+    this.profileFolderStore = deps.profileFolderStore ?? new InMemoryProfileFolderStore();
+  }
 
   async listProfiles(): Promise<Profile[]> {
     return this.deps.profileStore.list();
@@ -482,6 +514,73 @@ export class AppService {
     const renamed = store.rename(id, name);
     await this.deps.bookmarkStore.save(store);
     return renamed;
+  }
+
+  // ---- プロファイルのフォルダ分け（一覧画面の整理用） ----
+
+  /** フォルダ一覧（表示順）。 */
+  async listProfileFolders(): Promise<ProfileFolder[]> {
+    return sortFolders(await this.profileFolderStore.list());
+  }
+
+  /** フォルダを作成/リネームする（同一 id が既存なら名称のみ更新し、順序は保つ）。 */
+  async saveProfileFolder(input: { id: string; name: string }): Promise<ProfileFolder> {
+    const name = String(input.name ?? '').trim();
+    const folders = await this.profileFolderStore.list();
+    const existing = folders.find((f) => f.id === input.id);
+
+    let next: ProfileFolder[];
+    let saved: ProfileFolder;
+    if (existing) {
+      saved = { ...existing, name };
+      next = folders.map((f) => (f.id === input.id ? saved : f));
+    } else {
+      saved = { id: input.id, name, order: folders.length };
+      next = [...folders, saved];
+    }
+
+    const errors = validateProfileFolder(saved);
+    if (errors.length > 0) throw new Error(`invalid profile folder: ${errors.join(', ')}`);
+    if (!existing && !isValidFolderId(saved.id)) {
+      throw new Error(`invalid folder id: ${saved.id}`);
+    }
+
+    await this.profileFolderStore.saveAll(next);
+    return saved;
+  }
+
+  /**
+   * フォルダを削除する。フォルダに属していたプロファイルは削除せず、未整理へ戻す
+   * （フォルダ削除がサイト情報の削除にならないようにする）。
+   */
+  async deleteProfileFolder(id: string): Promise<void> {
+    const folders = await this.profileFolderStore.list();
+    const remaining = sortFolders(folders.filter((f) => f.id !== id)).map((f, i) => ({ ...f, order: i }));
+    await this.profileFolderStore.saveAll(remaining);
+
+    const profiles = await this.deps.profileStore.list();
+    const updated = removeFolderAssignment(profiles, id);
+    await this.deps.profileStore.saveAll(updated);
+  }
+
+  /** フォルダ自体の並び替え（ドラッグ&ドロップ）。 */
+  async reorderProfileFolders(id: string, targetIndex: number): Promise<ProfileFolder[]> {
+    const folders = await this.profileFolderStore.list();
+    const next = reorderFolders(folders, id, targetIndex);
+    await this.profileFolderStore.saveAll(next);
+    return next;
+  }
+
+  /** プロファイルをフォルダ間・フォルダ内で移動する（ドラッグ&ドロップ）。 */
+  async moveProfile(
+    profileId: string,
+    targetFolderId: string | null,
+    targetIndex: number,
+  ): Promise<Profile[]> {
+    const profiles = await this.deps.profileStore.list();
+    const next = moveProfileToFolder(profiles, profileId, targetFolderId, targetIndex);
+    await this.deps.profileStore.saveAll(next);
+    return next;
   }
 
   private async resolveConnection(

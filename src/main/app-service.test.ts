@@ -12,6 +12,7 @@ import type { FtpProfile, SftpProfile } from '../core/profile/index';
 import { SecretStore, type SafeStorageLike } from './secret-store';
 import { ProfileStore } from './profile-store';
 import { BookmarkFile } from './bookmark-store';
+import { ProfileFolderStore } from './profile-folder-store';
 import { AppService } from './app-service';
 
 class FakeSafeStorage implements SafeStorageLike {
@@ -539,6 +540,93 @@ describe('AppService', () => {
       service.addBookmark({ id: 'b1', profileId: 'p1', name: '   ', remotePath: '/a' }),
     ).rejects.toThrow();
     expect(await service.listBookmarks()).toEqual([]);
+  });
+});
+
+describe('AppService profile folders', () => {
+  let dir: string;
+  let service: AppService;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'sftps-pf-'));
+    service = new AppService({
+      profileStore: new ProfileStore(join(dir, 'profiles.json')),
+      secretStore: new SecretStore({ safeStorage: new FakeSafeStorage(), filePath: join(dir, 'secrets.json') }),
+      bookmarkStore: new BookmarkFile(join(dir, 'bookmarks.json')),
+      profileFolderStore: new ProfileFolderStore(join(dir, 'profile-folders.json')),
+      backupManager: new BackupManager({ backupRoot: join(dir, 'backups') }),
+      createTransport: () => new LocalTransport(join(dir, 'remote')),
+    });
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('creates a folder and lists it back', async () => {
+    const created = await service.saveProfileFolder({ id: 'f1', name: 'Prod' });
+    expect(created).toEqual({ id: 'f1', name: 'Prod', order: 0 });
+    expect(await service.listProfileFolders()).toEqual([created]);
+  });
+
+  it('renames an existing folder without changing its order', async () => {
+    await service.saveProfileFolder({ id: 'f1', name: 'Prod' });
+    await service.saveProfileFolder({ id: 'f2', name: 'Staging' });
+    const renamed = await service.saveProfileFolder({ id: 'f1', name: 'Production' });
+    expect(renamed).toEqual({ id: 'f1', name: 'Production', order: 0 });
+  });
+
+  it('rejects an invalid new folder id', async () => {
+    await expect(service.saveProfileFolder({ id: '../evil', name: 'x' })).rejects.toThrow();
+  });
+
+  it('reorders folders and persists the new order', async () => {
+    await service.saveProfileFolder({ id: 'a', name: 'A' });
+    await service.saveProfileFolder({ id: 'b', name: 'B' });
+    await service.saveProfileFolder({ id: 'c', name: 'C' });
+    const next = await service.reorderProfileFolders('c', 0);
+    expect(next.map((f) => f.id)).toEqual(['c', 'a', 'b']);
+    expect((await service.listProfileFolders()).map((f) => f.id)).toEqual(['c', 'a', 'b']);
+  });
+
+  it('moves a profile into a folder and back out', async () => {
+    await service.saveProfile({
+      id: 'p1',
+      name: 'Site 1',
+      protocol: 'sftp',
+      host: 'h',
+      port: 22,
+      user: 'u',
+    });
+    await service.saveProfileFolder({ id: 'f1', name: 'Prod' });
+
+    await service.moveProfile('p1', 'f1', 0);
+    let profiles = await service.listProfiles();
+    expect(profiles[0].folderId).toBe('f1');
+
+    await service.moveProfile('p1', null, 0);
+    profiles = await service.listProfiles();
+    expect(profiles[0].folderId).toBeUndefined();
+  });
+
+  it('deleting a folder unassigns its profiles instead of deleting them', async () => {
+    await service.saveProfile({
+      id: 'p1',
+      name: 'Site 1',
+      protocol: 'sftp',
+      host: 'h',
+      port: 22,
+      user: 'u',
+    });
+    await service.saveProfileFolder({ id: 'f1', name: 'Prod' });
+    await service.moveProfile('p1', 'f1', 0);
+
+    await service.deleteProfileFolder('f1');
+
+    expect(await service.listProfileFolders()).toEqual([]);
+    const profiles = await service.listProfiles();
+    expect(profiles).toHaveLength(1);
+    expect(profiles[0].folderId).toBeUndefined();
   });
 });
 

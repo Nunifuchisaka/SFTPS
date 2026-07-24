@@ -6,6 +6,13 @@ const api: FunabinFtpApi = {
   saveProfile: (input, options) => ipcRenderer.invoke(IPC.saveProfile, input, options),
   deleteProfile: (id, options) => ipcRenderer.invoke(IPC.deleteProfile, id, options),
   getProfileDefaults: () => ipcRenderer.invoke(IPC.getProfileDefaults),
+  listProfileFolders: () => ipcRenderer.invoke(IPC.listProfileFolders),
+  saveProfileFolder: (input) => ipcRenderer.invoke(IPC.saveProfileFolder, input),
+  deleteProfileFolder: (id) => ipcRenderer.invoke(IPC.deleteProfileFolder, id),
+  reorderProfileFolders: (id, targetIndex) =>
+    ipcRenderer.invoke(IPC.reorderProfileFolders, id, targetIndex),
+  moveProfile: (profileId, targetFolderId, targetIndex) =>
+    ipcRenderer.invoke(IPC.moveProfile, profileId, targetFolderId, targetIndex),
   testConnection: (id) => ipcRenderer.invoke(IPC.testConnection, id),
   listRemote: (id, remoteDir) => ipcRenderer.invoke(IPC.listRemote, id, remoteDir),
   prepareUpload: (id, localPath, remotePath) =>

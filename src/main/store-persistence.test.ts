@@ -6,6 +6,7 @@ import { ProfileStore } from './profile-store';
 import { HistoryFile } from './history-store';
 import { BookmarkFile } from './bookmark-store';
 import { SecretStore, type SafeStorageLike } from './secret-store';
+import { ProfileFolderStore } from './profile-folder-store';
 import { HistoryStore } from '../core/history/index';
 import { BookmarkStore } from '../core/bookmark/index';
 import type { Profile } from '../core/profile/index';
@@ -55,6 +56,11 @@ const cases: Array<{ name: string; file: string; save: (path: string) => Promise
       new SecretStore({ safeStorage: new FakeSafeStorage(), filePath: path }).setSecrets('p1', {
         password: 'x',
       }),
+  },
+  {
+    name: 'ProfileFolderStore',
+    file: 'profile-folders.json',
+    save: (path) => new ProfileFolderStore(path).saveAll([{ id: 'f1', name: 'Prod', order: 0 }]),
   },
 ];
 

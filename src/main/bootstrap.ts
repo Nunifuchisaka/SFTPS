@@ -12,6 +12,7 @@ import type { ProfileDefaults } from '../core/env/index';
 import type { HistoryStore, HistoryFilter, HistoryInput } from '../core/history/index';
 import { AppService } from './app-service';
 import { ProfileStore } from './profile-store';
+import { ProfileFolderStore } from './profile-folder-store';
 import { SecretStore, type SafeStorageLike } from './secret-store';
 import { createTransport, defaultTransportDeps, type TransportFactoryDeps } from './transport-factory';
 import { KnownHostsFile } from './known-hosts-store';
@@ -162,6 +163,7 @@ export async function createAppServices(deps: BootstrapDeps): Promise<AppService
     secretStore: new SecretStore({ safeStorage: deps.safeStorage, filePath: join(userData, 'secrets.json') }),
     backupManager,
     bookmarkStore: new BookmarkFile(join(userData, 'bookmarks.json')),
+    profileFolderStore: new ProfileFolderStore(join(userData, 'profile-folders.json')),
     createTransport: (profile, secrets) => createTransport(profile, secrets, transportDeps),
     historyStore: history,
     knownHosts,

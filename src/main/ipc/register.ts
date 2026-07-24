@@ -2,6 +2,7 @@ import { ipcMain } from 'electron';
 import {
   IPC,
   type DeleteProfileOptions,
+  type SaveProfileFolderInput,
   type SaveProfileOptions,
   type SyncFolderOptions,
   type TransferRequest,
@@ -43,6 +44,19 @@ export function registerIpc(deps: IpcHandlerDeps): IpcHandlers {
     h.deleteProfile(id, options),
   );
   ipcMain.handle(IPC.getProfileDefaults, () => h.getProfileDefaults());
+  ipcMain.handle(IPC.listProfileFolders, () => h.listProfileFolders());
+  ipcMain.handle(IPC.saveProfileFolder, (_e, input: SaveProfileFolderInput) =>
+    h.saveProfileFolder(input),
+  );
+  ipcMain.handle(IPC.deleteProfileFolder, (_e, id: string) => h.deleteProfileFolder(id));
+  ipcMain.handle(IPC.reorderProfileFolders, (_e, id: string, targetIndex: number) =>
+    h.reorderProfileFolders(id, targetIndex),
+  );
+  ipcMain.handle(
+    IPC.moveProfile,
+    (_e, profileId: string, targetFolderId: string | null, targetIndex: number) =>
+      h.moveProfile(profileId, targetFolderId, targetIndex),
+  );
   ipcMain.handle(IPC.getSettings, () => h.getSettings());
   ipcMain.handle(IPC.saveSettings, (_e, settings: unknown) => h.saveSettings(settings));
 

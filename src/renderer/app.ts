@@ -21,9 +21,11 @@ import { confirmDeletion, parseMode, isActionAvailable } from '../core/remoteops
 import type { HistoryFilter, HistoryKind, HistoryStatus } from '../core/history/index';
 import type { Bookmark } from '../core/bookmark/index';
 import type { KnownHostEntry } from '../core/hostkey/index';
+import type { ProfileFolder } from '../core/profile-folder/index';
 import { createHistoryView } from './history-view';
 import { createBookmarkView } from './bookmark-view';
 import { createKnownHostsView } from './known-hosts-view';
+import { createProfileListView } from './profile-list-view';
 import { createTranslator, dictionaries, resolveLocale, LOCALES } from '../core/i18n/index';
 import { classifyConnectionError, connectionErrorMessageKey } from '../core/reconnect/index';
 import { normalizeThemeSetting, THEME_SETTINGS, type ThemeSetting } from '../core/theme/index';
@@ -92,6 +94,8 @@ function parentDir(p: string): string {
 
 interface State {
   profiles: Profile[];
+  profileFolders: ProfileFolder[];
+  collapsedFolderIds: Set<string>;
   currentProfileId: string | null;
   localDir: string;
   localEntries: RemoteEntry[];
@@ -125,6 +129,8 @@ export function mountApp(root: string | HTMLElement): void {
 
   const state: State = {
     profiles: [],
+    profileFolders: [],
+    collapsedFolderIds: new Set(),
     currentProfileId: null,
     localDir: '',
     localEntries: [],
@@ -153,6 +159,7 @@ export function mountApp(root: string | HTMLElement): void {
   };
 
   let bookmarkSeq = 0;
+  let folderSeq = 0;
 
   const locale = resolveLocale(
     window.localStorage.getItem('funabinftp.locale') ?? window.navigator.language,
@@ -219,6 +226,7 @@ export function mountApp(root: string | HTMLElement): void {
   // ---- profiles -------------------------------------------------------------
   async function refreshProfiles(): Promise<void> {
     state.profiles = (await guard('プロファイル読込', () => api.listProfiles())) ?? [];
+    state.profileFolders = (await guard('フォルダ読込', () => api.listProfileFolders())) ?? [];
     renderProfiles();
   }
 
@@ -226,29 +234,84 @@ export function mountApp(root: string | HTMLElement): void {
     profilePanel.replaceChildren();
     profilePanel.append(h('h2', {}, [t('panel.profiles')]));
 
-    const list = h('ul', { class: 'list_1' });
-    for (const p of state.profiles) {
-      const active = p.id === state.currentProfileId;
-      const item = h('li', { class: `list_1__item${active ? ' is_active' : ''}` }, [
-        h('span', { class: 'list_1__label' }, [`${p.name} [${p.protocol}]`]),
-        h('button', { class: 'btn_1', onclick: () => void selectProfile(p.id) }, [t('btn.connect')]),
-        h(
-          'button',
-          {
-            class: 'btn_1',
-            onclick: () => {
-              state.editing = p;
-              renderProfiles();
-            },
-          },
-          [t('btn.edit')],
-        ),
-        h('button', { class: 'btn_1', onclick: () => void deleteProfile(p.id) }, [t('btn.delete')]),
-      ]);
-      list.append(item);
-    }
-    profilePanel.append(list);
+    profilePanel.append(
+      createProfileListView(state.profiles, state.profileFolders, {
+        currentProfileId: state.currentProfileId,
+        collapsedFolderIds: state.collapsedFolderIds,
+        labels: {
+          connect: t('btn.connect'),
+          edit: t('btn.edit'),
+          delete: t('btn.delete'),
+          unfiled: t('profileList.unfiled'),
+          addFolder: t('profileList.addFolder'),
+          folderNamePlaceholder: t('profileList.folderNamePlaceholder'),
+          renameFolder: t('profileList.renameFolder'),
+          deleteFolder: t('profileList.deleteFolder'),
+          empty: t('profileList.empty'),
+        },
+        onConnect: (p) => void selectProfile(p.id),
+        onEdit: (p) => {
+          state.editing = p;
+          renderProfiles();
+        },
+        onDelete: (p) => void deleteProfile(p.id),
+        onToggleCollapse: (folderId) => {
+          if (state.collapsedFolderIds.has(folderId)) state.collapsedFolderIds.delete(folderId);
+          else state.collapsedFolderIds.add(folderId);
+          renderProfiles();
+        },
+        onAddFolder: (name) => void addProfileFolder(name),
+        onRenameFolder: (folder) => void renameProfileFolder(folder),
+        onDeleteFolder: (folder) => void deleteProfileFolder(folder),
+        onMoveProfile: (profileId, targetFolderId, targetIndex) =>
+          void moveProfile(profileId, targetFolderId, targetIndex),
+        onMoveFolder: (folderId, targetIndex) => void reorderProfileFolders(folderId, targetIndex),
+      }),
+    );
     profilePanel.append(renderProfileForm());
+  }
+
+  async function addProfileFolder(name: string): Promise<void> {
+    const id = `pf${Date.now()}-${folderSeq++}`;
+    const ok = await guard('フォルダ追加', () => api.saveProfileFolder({ id, name }));
+    if (!ok) return;
+    await refreshProfiles();
+  }
+
+  async function renameProfileFolder(folder: ProfileFolder): Promise<void> {
+    const name = window.prompt(t('profileList.folderNamePrompt'), folder.name);
+    if (name === null || name.trim() === '') return;
+    const ok = await guard('フォルダ名変更', () => api.saveProfileFolder({ id: folder.id, name: name.trim() }));
+    if (!ok) return;
+    await refreshProfiles();
+  }
+
+  async function deleteProfileFolder(folder: ProfileFolder): Promise<void> {
+    if (!window.confirm(t('profileList.deleteFolderConfirm', { name: folder.name }))) return;
+    const ok = await guardOk('フォルダ削除', () => api.deleteProfileFolder(folder.id));
+    if (!ok) return;
+    state.collapsedFolderIds.delete(folder.id);
+    await refreshProfiles();
+  }
+
+  async function moveProfile(
+    profileId: string,
+    targetFolderId: string | null,
+    targetIndex: number,
+  ): Promise<void> {
+    const next = await guard('プロファイル並び替え', () =>
+      api.moveProfile(profileId, targetFolderId, targetIndex),
+    );
+    if (!next) return;
+    state.profiles = next;
+    renderProfiles();
+  }
+
+  async function reorderProfileFolders(folderId: string, targetIndex: number): Promise<void> {
+    const next = await guard('フォルダ並び替え', () => api.reorderProfileFolders(folderId, targetIndex));
+    if (!next) return;
+    state.profileFolders = next;
+    renderProfiles();
   }
 
   function renderProfileForm(): HTMLElement {

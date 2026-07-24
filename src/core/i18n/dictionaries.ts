@@ -54,6 +54,15 @@ export const dictionaries: Record<Locale, Dictionary> = {
     'btn.up': '..上へ',
     'form.newProfile': 'プロファイル新規追加',
     'form.editProfile': 'プロファイル編集: {id}',
+    'profileList.unfiled': '未整理',
+    'profileList.addFolder': 'フォルダ追加',
+    'profileList.folderNamePlaceholder': '新しいフォルダ名',
+    'profileList.renameFolder': '名称変更',
+    'profileList.deleteFolder': 'フォルダ削除',
+    'profileList.empty': 'プロファイルがありません。下のフォームから追加してください。',
+    'profileList.folderNamePrompt': 'フォルダ名を入力してください',
+    'profileList.deleteFolderConfirm':
+      'フォルダ「{name}」を削除します。中のプロファイルは削除されず、未整理に戻ります。よろしいですか？',
     'hostkey.prompt.title': 'ホスト鍵の確認',
     'hostkey.prompt.unknown.message': '{host}:{port} のホスト鍵は未登録です。信頼しますか？',
     'hostkey.prompt.unknown.detail':
@@ -120,6 +129,15 @@ export const dictionaries: Record<Locale, Dictionary> = {
     'btn.up': '..Up',
     'form.newProfile': 'Add new profile',
     'form.editProfile': 'Edit profile: {id}',
+    'profileList.unfiled': 'Unfiled',
+    'profileList.addFolder': 'Add folder',
+    'profileList.folderNamePlaceholder': 'New folder name',
+    'profileList.renameFolder': 'Rename',
+    'profileList.deleteFolder': 'Delete folder',
+    'profileList.empty': 'No profiles yet. Add one using the form below.',
+    'profileList.folderNamePrompt': 'Enter a folder name',
+    'profileList.deleteFolderConfirm':
+      'Delete the folder "{name}"? Profiles inside it will not be deleted; they move back to Unfiled.',
     'hostkey.prompt.title': 'Host key verification',
     'hostkey.prompt.unknown.message': 'The host key of {host}:{port} is not known. Trust it?',
     'hostkey.prompt.unknown.detail':

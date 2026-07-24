@@ -1,4 +1,5 @@
 import type { Profile } from '../../core/profile/index';
+import type { ProfileFolder } from '../../core/profile-folder/index';
 import type { ProfileDefaults } from '../../core/env/index';
 import type { RemoteEntry } from '../../core/transport/index';
 import type { UploadPreview, CommitResult } from '../../core/upload/index';
@@ -22,6 +23,7 @@ import type {
   PrepareSyncResult,
   QueueStatus,
   RestoreBackupResult,
+  SaveProfileFolderInput,
   SaveProfileOptions,
   SyncFolderOptions,
   TransferRequest,
@@ -34,6 +36,11 @@ export interface IpcService {
   listProfiles(): Promise<Profile[]>;
   saveProfile(input: Profile, options?: SaveProfileOptions): Promise<Profile>;
   deleteProfile(id: string, options?: DeleteProfileOptions): Promise<DeleteProfileResult>;
+  listProfileFolders(): Promise<ProfileFolder[]>;
+  saveProfileFolder(input: SaveProfileFolderInput): Promise<ProfileFolder>;
+  deleteProfileFolder(id: string): Promise<void>;
+  reorderProfileFolders(id: string, targetIndex: number): Promise<ProfileFolder[]>;
+  moveProfile(profileId: string, targetFolderId: string | null, targetIndex: number): Promise<Profile[]>;
   testConnection(id: string): Promise<ConnectionResult>;
   listRemote(id: string, remoteDir: string): Promise<RemoteEntry[]>;
   prepareUpload(id: string, localPath: string, remotePath: string): Promise<UploadPreview>;
@@ -240,6 +247,13 @@ export function createIpcHandlers(deps: IpcHandlerDeps) {
     deleteProfile: (id: string, options?: DeleteProfileOptions) =>
       deps.service.deleteProfile(id, options),
     getProfileDefaults: (): ProfileDefaults | null => deps.getProfileDefaults(),
+    listProfileFolders: () => deps.service.listProfileFolders(),
+    saveProfileFolder: (input: SaveProfileFolderInput) => deps.service.saveProfileFolder(input),
+    deleteProfileFolder: (id: string) => deps.service.deleteProfileFolder(id),
+    reorderProfileFolders: (id: string, targetIndex: number) =>
+      deps.service.reorderProfileFolders(id, targetIndex),
+    moveProfile: (profileId: string, targetFolderId: string | null, targetIndex: number) =>
+      deps.service.moveProfile(profileId, targetFolderId, targetIndex),
     getSettings: (): AppSettings => deps.settings.get(),
     saveSettings: (input: unknown): Promise<AppSettings> => deps.settings.save(input),
 

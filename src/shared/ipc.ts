@@ -1,4 +1,5 @@
 import type { Profile, SecretKey } from '../core/profile/index';
+import type { ProfileFolder } from '../core/profile-folder/index';
 import type { ProfileDefaults } from '../core/env/index';
 import type { RemoteEntry } from '../core/transport/index';
 import type { UploadPreview, CommitResult } from '../core/upload/index';
@@ -44,6 +45,12 @@ export interface SaveProfileOptions {
    * 空欄は「据え置き」であり削除ではないため、消去はこの明示指定でのみ行う。
    */
   clearSecrets?: SecretKey[];
+}
+
+/** フォルダの作成/リネーム入力（id 未存在なら新規作成、既存なら名称のみ更新）。 */
+export interface SaveProfileFolderInput {
+  id: string;
+  name: string;
 }
 
 /** キューへ投入する転送リクエスト（kind で判別）。 */
@@ -110,6 +117,11 @@ export const IPC = {
   saveProfile: 'profiles:save',
   deleteProfile: 'profiles:delete',
   getProfileDefaults: 'profiles:defaults',
+  moveProfile: 'profiles:move',
+  listProfileFolders: 'profileFolders:list',
+  saveProfileFolder: 'profileFolders:save',
+  deleteProfileFolder: 'profileFolders:delete',
+  reorderProfileFolders: 'profileFolders:reorder',
   testConnection: 'conn:test',
   listRemote: 'remote:list',
   prepareUpload: 'upload:prepare',
@@ -165,6 +177,15 @@ export interface FunabinFtpApi {
    * 新規作成フォームの初期値プリセットにのみ使う（保存は必ずユーザー操作経由）。
    */
   getProfileDefaults(): Promise<ProfileDefaults | null>;
+  /** プロファイル一覧画面: フォルダ分け・並び替え。 */
+  listProfileFolders(): Promise<ProfileFolder[]>;
+  saveProfileFolder(input: SaveProfileFolderInput): Promise<ProfileFolder>;
+  /** フォルダを削除する（属していたプロファイルは削除せず未整理へ戻る）。 */
+  deleteProfileFolder(id: string): Promise<void>;
+  /** フォルダ自体の並び替え（ドラッグ&ドロップ）。返り値は並び替え後の全フォルダ。 */
+  reorderProfileFolders(id: string, targetIndex: number): Promise<ProfileFolder[]>;
+  /** プロファイルをフォルダ間・フォルダ内で移動する（ドラッグ&ドロップ）。返り値は移動後の全プロファイル。 */
+  moveProfile(profileId: string, targetFolderId: string | null, targetIndex: number): Promise<Profile[]>;
   testConnection(id: string): Promise<ConnectionResult>;
   listRemote(id: string, remoteDir: string): Promise<RemoteEntry[]>;
   prepareUpload(id: string, localPath: string, remotePath: string): Promise<UploadPreview>;

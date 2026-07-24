@@ -3,7 +3,15 @@ export type Protocol = 'ftp' | 'sftp' | 's3';
 /** FTP の TLS モード。none=平文 / explicit=AUTH TLS / implicit=暗黙TLS。 */
 export type FtpSecurity = 'none' | 'explicit' | 'implicit';
 
-export interface FtpProfile {
+/** 一覧画面でのフォルダ分け・並び順の共通フィールド。全プロトコル共通。 */
+export interface ProfileOrganization {
+  /** 所属フォルダの id。未指定/undefined = 未整理（フォルダなし）。 */
+  folderId?: string;
+  /** 同一グループ（同じ folderId、または未整理）内での表示順。 */
+  order?: number;
+}
+
+export interface FtpProfile extends ProfileOrganization {
   id: string;
   name: string;
   protocol: 'ftp';
@@ -22,7 +30,7 @@ export interface FtpProfile {
   password?: string;
 }
 
-export interface SftpProfile {
+export interface SftpProfile extends ProfileOrganization {
   id: string;
   name: string;
   protocol: 'sftp';
@@ -43,7 +51,7 @@ export interface SftpProfile {
   passphrase?: string;
 }
 
-export interface S3Profile {
+export interface S3Profile extends ProfileOrganization {
   id: string;
   name: string;
   protocol: 's3';
@@ -161,6 +169,13 @@ export function validateProfile(profile: Profile): string[] {
       profile.connectTimeoutMs > 600_000)
   ) {
     errors.push('connectTimeoutMs must be a positive integer up to 600000');
+  }
+
+  if (profile.folderId !== undefined && typeof profile.folderId !== 'string') {
+    errors.push('folderId must be a string');
+  }
+  if (profile.order !== undefined && !Number.isInteger(profile.order)) {
+    errors.push('order must be an integer');
   }
 
   return errors;

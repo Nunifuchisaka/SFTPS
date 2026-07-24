@@ -133,6 +133,70 @@ h3 {
   white-space: nowrap;
 }
 
+.profile_list_1__toolbar {
+  margin-bottom: 8px;
+}
+
+.profile_list_1__folders {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.profile_list_1__folder {
+  margin-bottom: 6px;
+}
+
+.profile_list_1__folder_header,
+.profile_list_1__unfiled_header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: var(--btn-bg);
+  cursor: grab;
+}
+
+.profile_list_1__unfiled_header {
+  cursor: default;
+  margin: 8px 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.profile_list_1__folder_label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile_list_1__collapse {
+  min-width: 22px;
+}
+
+.profile_list_1__items {
+  max-height: none;
+  margin-left: 12px;
+}
+
+.profile_list_1__item {
+  cursor: grab;
+}
+
+.profile_list_1__folder_header.is_dragover,
+.profile_list_1__unfiled_header.is_dragover,
+.profile_list_1__item.is_dragover {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+}
+
+.profile_list_1__empty {
+  color: var(--muted);
+  padding: 8px 0;
+}
+
 .browser_1__path {
   color: var(--muted);
   font-family: ui-monospace, Consolas, monospace;

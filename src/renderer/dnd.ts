@@ -2,6 +2,10 @@
 export const LOCAL_DRAG_MIME = 'application/x-funabinftp-local-entries';
 /** リモート一覧の行をローカルパネルへドラッグしたことを示すカスタム MIME タイプ（ダウンロード）。 */
 export const REMOTE_DRAG_MIME = 'application/x-funabinftp-remote-entries';
+/** プロファイル一覧内での行ドラッグ（フォルダ間移動・並び替え）を示すカスタム MIME タイプ。 */
+export const PROFILE_DRAG_MIME = 'application/x-funabinftp-profile-entry';
+/** プロファイル一覧内でのフォルダ見出しドラッグ（フォルダ並び替え）を示すカスタム MIME タイプ。 */
+export const PROFILE_FOLDER_DRAG_MIME = 'application/x-funabinftp-profile-folder';
 
 /**
  * 要素をドロップゾーンにする最小配線。
