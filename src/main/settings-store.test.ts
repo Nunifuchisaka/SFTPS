@@ -28,7 +28,11 @@ describe('SettingsFile', () => {
       backup: { maxGenerations: 5, maxAgeDays: 14 },
       diff: { maxBytes: 4096 },
     });
-    expect(saved).toEqual({ backup: { maxGenerations: 5, maxAgeDays: 14 }, diff: { maxBytes: 4096 } });
+    expect(saved).toEqual({
+      backup: { maxGenerations: 5, maxAgeDays: 14 },
+      diff: { maxBytes: 4096 },
+      uploadExtensionFilter: { enabled: false, extensions: [] },
+    });
     expect(await new SettingsFile(file).load()).toEqual(saved);
     expect(await readFile(file, 'utf8')).toContain('maxAgeDays');
   });

@@ -53,4 +53,22 @@ describe('walkTree', () => {
     expect(byPath['a.txt'].hash).toBe(hashBuffer(Buffer.from('aaa')));
     expect(byPath['sub'].hash).toBeUndefined();
   });
+
+  it('excludes files whose extension is not in the allow-list, but still recurses into dirs', async () => {
+    await writeFile(join(root, 'photo.jpg'), Buffer.from('jpg'));
+    const entries = await walkTree(t, '/', { extensions: ['jpg'] });
+    const paths = entries.map((e) => e.path).sort();
+    expect(paths).toEqual(['photo.jpg', 'sub', 'sub/deep']);
+  });
+
+  it('does not filter directories by extension', async () => {
+    const entries = await walkTree(t, '/', { extensions: ['jpg'] });
+    expect(entries.some((e) => e.path === 'sub' && e.type === 'dir')).toBe(true);
+  });
+
+  it('allows everything when extensions is empty or omitted', async () => {
+    const withEmpty = await walkTree(t, '/', { extensions: [] });
+    const withOmitted = await walkTree(t, '/');
+    expect(withEmpty.map((e) => e.path).sort()).toEqual(withOmitted.map((e) => e.path).sort());
+  });
 });

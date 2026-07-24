@@ -45,7 +45,9 @@ import {
   buildUploadRequests,
   buildRequestsFromDropTargets,
   buildDownloadRequestsFromTargets,
+  filterUploadRequestsByExtension,
 } from './bulk-transfer';
+import { normalizeExtensionList } from '../core/upload/extension-filter';
 import { attachDropZone, attachInternalDropZone, LOCAL_DRAG_MIME, REMOTE_DRAG_MIME } from './dnd';
 import {
   buildProfileFromForm,
@@ -530,6 +532,16 @@ export function mountApp(root: string | HTMLElement): void {
     const generationsIn = numberIn(state.settings.backup.maxGenerations);
     const ageIn = numberIn(state.settings.backup.maxAgeDays ?? 0);
     const diffIn = numberIn(state.settings.diff.maxBytes);
+    const extFilterEnabledIn = h('input', {
+      type: 'checkbox',
+      checked: state.settings.uploadExtensionFilter.enabled,
+    }) as HTMLInputElement;
+    const extFilterListIn = h('input', {
+      class: 'form_1__input',
+      type: 'text',
+      value: state.settings.uploadExtensionFilter.extensions.join(', '),
+      placeholder: 'jpg, png, pdf',
+    }) as HTMLInputElement;
 
     settingsPanel.replaceChildren(
       h('h2', {}, [t('panel.settings')]),
@@ -537,6 +549,8 @@ export function mountApp(root: string | HTMLElement): void {
         h('label', {}, [`${t('settings.backupMaxGenerations')}: `, generationsIn]),
         h('label', {}, [`${t('settings.backupMaxAgeDays')}: `, ageIn]),
         h('label', {}, [`${t('settings.diffMaxBytes')}: `, diffIn]),
+        h('label', {}, [extFilterEnabledIn, ` ${t('settings.uploadExtFilterEnabled')}`]),
+        h('label', {}, [`${t('settings.uploadExtFilterList')}: `, extFilterListIn]),
       ]),
       h('div', { class: 'form_1__actions' }, [
         h(
@@ -551,6 +565,10 @@ export function mountApp(root: string | HTMLElement): void {
                   maxAgeDays: Number(ageIn.value) > 0 ? Number(ageIn.value) : null,
                 },
                 diff: { maxBytes: Number(diffIn.value) },
+                uploadExtensionFilter: {
+                  enabled: extFilterEnabledIn.checked,
+                  extensions: normalizeExtensionList(extFilterListIn.value.split(/[,\s]+/)),
+                },
               }),
           },
           [t('btn.save')],
@@ -711,9 +729,14 @@ export function mountApp(root: string | HTMLElement): void {
       setStatus('アップロードするファイルを選択してください', true);
       return;
     }
-    const requests = buildUploadRequests(state.currentProfileId, paths, state.remoteDir);
+    const built = buildUploadRequests(state.currentProfileId, paths, state.remoteDir);
+    const { allowed: requests, skipped } = filterUploadRequestsByExtension(
+      built,
+      state.settings.uploadExtensionFilter,
+    );
     for (const req of requests) await api.enqueueTransfer(req);
-    setStatus(`${requests.length}件をアップロードキューに追加しました`);
+    const skippedNote = skipped > 0 ? `（拡張子フィルタで${skipped}件除外）` : '';
+    setStatus(`${requests.length}件をアップロードキューに追加しました${skippedNote}`);
     await refreshQueue();
   }
 
@@ -1022,9 +1045,14 @@ export function mountApp(root: string | HTMLElement): void {
     void (async () => {
       const items = await classifyDroppedPaths(paths, (p) => api.isDirectory(p));
       const targets = resolveDropTargets(items, state.remoteDir);
-      const requests = buildRequestsFromDropTargets(profileId, targets);
+      const built = buildRequestsFromDropTargets(profileId, targets);
+      const { allowed: requests, skipped } = filterUploadRequestsByExtension(
+        built,
+        state.settings.uploadExtensionFilter,
+      );
       for (const req of requests) await api.enqueueTransfer(req);
-      setStatus(`${requests.length}件をドロップからキューに追加しました`);
+      const skippedNote = skipped > 0 ? `（拡張子フィルタで${skipped}件除外）` : '';
+      setStatus(`${requests.length}件をドロップからキューに追加しました${skippedNote}`);
       await refreshQueue();
     })();
   }
@@ -1040,10 +1068,15 @@ export function mountApp(root: string | HTMLElement): void {
     if (entries.length === 0) return;
     const items = entries.map((e) => ({ path: e.path, isDirectory: e.type === 'dir' }));
     const targets = resolveDropTargets(items, state.remoteDir);
-    const requests = buildRequestsFromDropTargets(profileId, targets);
+    const built = buildRequestsFromDropTargets(profileId, targets);
+    const { allowed: requests, skipped } = filterUploadRequestsByExtension(
+      built,
+      state.settings.uploadExtensionFilter,
+    );
     void (async () => {
       for (const req of requests) await api.enqueueTransfer(req);
-      setStatus(`${requests.length}件をドロップからキューに追加しました`);
+      const skippedNote = skipped > 0 ? `（拡張子フィルタで${skipped}件除外）` : '';
+      setStatus(`${requests.length}件をドロップからキューに追加しました${skippedNote}`);
       await refreshQueue();
     })();
   }

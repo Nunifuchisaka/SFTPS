@@ -4,6 +4,7 @@ import {
   buildUploadRequests,
   buildRequestsFromDropTargets,
   buildDownloadRequestsFromTargets,
+  filterUploadRequestsByExtension,
 } from './bulk-transfer';
 
 describe('buildUploadRequests', () => {
@@ -38,6 +39,43 @@ describe('buildRequestsFromDropTargets', () => {
       remoteDir: '/pub/dir',
       label: 'sync → /pub/dir',
     });
+  });
+});
+
+describe('filterUploadRequestsByExtension', () => {
+  const reqs = buildUploadRequests('p1', ['/a/x.jpg', '/a/y.exe'], '/pub');
+
+  it('passes everything through when the filter is disabled', () => {
+    const { allowed, skipped } = filterUploadRequestsByExtension(reqs, {
+      enabled: false,
+      extensions: ['jpg'],
+    });
+    expect(allowed).toEqual(reqs);
+    expect(skipped).toBe(0);
+  });
+
+  it('excludes upload requests whose extension is not allowed and counts them', () => {
+    const { allowed, skipped } = filterUploadRequestsByExtension(reqs, {
+      enabled: true,
+      extensions: ['jpg'],
+    });
+    expect(allowed.map((r) => r.label)).toEqual(['x.jpg']);
+    expect(skipped).toBe(1);
+  });
+
+  it('always passes through sync requests regardless of extension', () => {
+    const targets: DropTarget[] = [
+      { kind: 'upload', sourcePath: '/a/f.exe', destPath: '/pub/f.exe' },
+      { kind: 'sync', sourcePath: '/a/dir', destPath: '/pub/dir' },
+    ];
+    const mixed = buildRequestsFromDropTargets('p1', targets);
+    const { allowed, skipped } = filterUploadRequestsByExtension(mixed, {
+      enabled: true,
+      extensions: ['jpg'],
+    });
+    expect(allowed).toHaveLength(1);
+    expect(allowed[0].kind).toBe('sync');
+    expect(skipped).toBe(1);
   });
 });
 

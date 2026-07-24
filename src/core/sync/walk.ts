@@ -1,6 +1,7 @@
 import type { RemoteTransport } from '../transport/index';
 import { posixJoin, toPosixPath } from '../transport/path-utils';
 import { hashBuffer } from '../checksum/index';
+import { hasAllowedExtension } from '../upload/extension-filter';
 import { DEFAULT_IGNORE, isIgnored } from './ignore';
 import type { SyncEntry } from './types';
 
@@ -11,6 +12,8 @@ export interface WalkOptions {
   maxDepth?: number;
   /** true のとき各ファイルの内容を読んでハッシュを計算する（checksum 比較用・コスト高）。 */
   computeHash?: boolean;
+  /** 許可拡張子リスト（正規化済み）。空/未指定なら無制限。ディレクトリには適用しない。 */
+  extensions?: string[];
 }
 
 /**
@@ -25,6 +28,7 @@ export async function walkTree(
   const ignore = options.ignore ?? DEFAULT_IGNORE;
   const maxDepth = options.maxDepth ?? 64;
   const computeHash = options.computeHash ?? false;
+  const extensions = options.extensions ?? [];
   const baseNorm = toPosixPath(base);
   const result: SyncEntry[] = [];
 
@@ -34,6 +38,7 @@ export async function walkTree(
     for (const entry of entries) {
       const rel = relPrefix === '' ? entry.name : `${relPrefix}/${entry.name}`;
       if (isIgnored(rel, ignore)) continue;
+      if (entry.type === 'file' && !hasAllowedExtension(entry.name, extensions)) continue;
       const childAbs = posixJoin(dirAbs, entry.name);
       const syncEntry: SyncEntry = {
         path: rel,

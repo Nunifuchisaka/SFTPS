@@ -1,6 +1,7 @@
 import { DEFAULT_BACKUP_RETENTION, type BackupRetention } from '../backup/retention';
 // 差分ライブラリ本体をレンダラへ持ち込まないよう、定数だけのモジュールから読む。
 import { DEFAULT_MAX_DIFF_BYTES } from '../diff/limits';
+import { normalizeExtensionList } from '../upload/extension-filter';
 
 /** アプリ全体の設定（プロファイルに紐づかない、ユーザー単位の方針）。 */
 export interface AppSettings {
@@ -10,6 +11,12 @@ export interface AppSettings {
   diff: {
     /** 文字差分を行う上限バイト数。超過分はサイズ比較へフォールバックする。 */
     maxBytes: number;
+  };
+  /** アップロードを許可する拡張子の制限（有効時、リストにない拡張子はアップロードされない）。 */
+  uploadExtensionFilter: {
+    enabled: boolean;
+    /** 正規化済み拡張子リスト（小文字・先頭ドットなし）。空なら実質無制限。 */
+    extensions: string[];
   };
 }
 
@@ -21,6 +28,7 @@ export const MAX_BACKUP_AGE_DAYS = 3650;
 export const DEFAULT_SETTINGS: AppSettings = {
   backup: { ...DEFAULT_BACKUP_RETENTION },
   diff: { maxBytes: DEFAULT_MAX_DIFF_BYTES },
+  uploadExtensionFilter: { enabled: false, extensions: [] },
 };
 
 function record(value: unknown): Record<string, unknown> {
@@ -43,6 +51,7 @@ export function normalizeSettings(input: unknown): AppSettings {
   const root = record(input);
   const backup = record(root['backup']);
   const diff = record(root['diff']);
+  const uploadExtensionFilter = record(root['uploadExtensionFilter']);
 
   const rawAge = backup['maxAgeDays'];
   const maxAgeDays =
@@ -68,6 +77,10 @@ export function normalizeSettings(input: unknown): AppSettings {
         DEFAULT_SETTINGS.diff.maxBytes,
       ),
     },
+    uploadExtensionFilter: {
+      enabled: uploadExtensionFilter['enabled'] === true,
+      extensions: normalizeExtensionList(uploadExtensionFilter['extensions']),
+    },
   };
 }
 
@@ -80,6 +93,14 @@ export function parseSettings(json: string): AppSettings {
   try {
     return normalizeSettings(JSON.parse(json));
   } catch {
-    return { ...DEFAULT_SETTINGS, backup: { ...DEFAULT_SETTINGS.backup }, diff: { ...DEFAULT_SETTINGS.diff } };
+    return {
+      ...DEFAULT_SETTINGS,
+      backup: { ...DEFAULT_SETTINGS.backup },
+      diff: { ...DEFAULT_SETTINGS.diff },
+      uploadExtensionFilter: {
+        ...DEFAULT_SETTINGS.uploadExtensionFilter,
+        extensions: [...DEFAULT_SETTINGS.uploadExtensionFilter.extensions],
+      },
+    };
   }
 }

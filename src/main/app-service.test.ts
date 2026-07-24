@@ -681,7 +681,11 @@ describe('AppService diff size limit', () => {
       bookmarkStore: new BookmarkFile(join(dir, 'bookmarks.json')),
       backupManager: new BackupManager({ backupRoot: join(dir, 'backups') }),
       createTransport: () => transport,
-      settings: () => ({ backup: { maxGenerations: 20, maxAgeDays: null }, diff: { maxBytes } }),
+      settings: () => ({
+        backup: { maxGenerations: 20, maxAgeDays: null },
+        diff: { maxBytes },
+        uploadExtensionFilter: { enabled: false, extensions: [] },
+      }),
     });
     await service.saveProfile(ftpProfile);
   });

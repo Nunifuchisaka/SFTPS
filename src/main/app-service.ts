@@ -232,9 +232,10 @@ export class AppService {
   ): Promise<PrepareSyncResult> {
     return this.withTransport(id, async (dest) => {
       const computeHash = options.compareBy === 'checksum';
+      const extensions = this.uploadExtensions();
       const source = await this.openLocalSource(localDir);
-      const sourceEntries = await walkTree(source, '/', { ignore: options.ignore, computeHash });
-      const destEntries = await this.safeWalk(dest, remoteDir, options.ignore, computeHash);
+      const sourceEntries = await walkTree(source, '/', { ignore: options.ignore, computeHash, extensions });
+      const destEntries = await this.safeWalk(dest, remoteDir, options.ignore, computeHash, extensions);
       const plan = planSync(sourceEntries, destEntries, {
         compareBy: options.compareBy,
         deleteExtraneous: options.deleteExtraneous,
@@ -270,10 +271,11 @@ export class AppService {
 
     return this.withTransport(id, async (dest) => {
       const computeHash = options.compareBy === 'checksum';
+      const extensions = this.uploadExtensions();
       const source = await this.openLocalSource(localDir);
       await dest.mkdir(remoteDir);
-      const sourceEntries = await walkTree(source, '/', { ignore: options.ignore, computeHash });
-      const destEntries = await this.safeWalk(dest, remoteDir, options.ignore, computeHash);
+      const sourceEntries = await walkTree(source, '/', { ignore: options.ignore, computeHash, extensions });
+      const destEntries = await this.safeWalk(dest, remoteDir, options.ignore, computeHash, extensions);
       const plan = planSync(sourceEntries, destEntries, {
         compareBy: options.compareBy,
         deleteExtraneous: options.deleteExtraneous,
@@ -339,13 +341,20 @@ export class AppService {
     dir: string,
     ignore?: string[],
     computeHash?: boolean,
+    extensions?: string[],
   ): Promise<SyncEntry[]> {
     try {
-      return await walkTree(transport, dir, { ignore, computeHash });
+      return await walkTree(transport, dir, { ignore, computeHash, extensions });
     } catch {
       // リモート側にディレクトリがまだ存在しない場合は空とみなす。
       return [];
     }
+  }
+
+  /** アップロード許可拡張子リスト（設定で無効なら undefined = 無制限）。 */
+  private uploadExtensions(): string[] | undefined {
+    const filter = this.settings().uploadExtensionFilter;
+    return filter.enabled ? filter.extensions : undefined;
   }
 
   /** ダウンロード差分プレビュー（before=既存ローカル, after=リモート新内容）。 */
