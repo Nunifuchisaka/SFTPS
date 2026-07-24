@@ -7,11 +7,12 @@ import {
 } from './index';
 
 describe('DEFAULT_SETTINGS', () => {
-  it('keeps the previous behaviour as the default (20 generations, unlimited age, 1MB diff, no extension filter)', () => {
+  it('keeps the previous behaviour as the default (20 generations, unlimited age, 1MB diff, no extension filters)', () => {
     expect(DEFAULT_SETTINGS).toEqual({
       backup: { maxGenerations: 20, maxAgeDays: null },
       diff: { maxBytes: 1024 * 1024 },
       uploadExtensionFilter: { enabled: false, extensions: [] },
+      downloadExtensionFilter: { enabled: false, extensions: [] },
     });
   });
 });
@@ -28,19 +29,26 @@ describe('normalizeSettings', () => {
       backup: { maxGenerations: 5, maxAgeDays: 30 },
       diff: { maxBytes: 65536 },
       uploadExtensionFilter: { enabled: true, extensions: ['jpg', 'PNG'] },
+      downloadExtensionFilter: { enabled: true, extensions: ['pdf', 'DOC'] },
     });
     expect(s).toEqual({
       backup: { maxGenerations: 5, maxAgeDays: 30 },
       diff: { maxBytes: 65536 },
       uploadExtensionFilter: { enabled: true, extensions: ['jpg', 'png'] },
+      downloadExtensionFilter: { enabled: true, extensions: ['pdf', 'doc'] },
     });
   });
 
-  it('defaults the extension filter to disabled and empty when missing or malformed', () => {
+  it('defaults the extension filters to disabled and empty when missing or malformed', () => {
     expect(normalizeSettings({}).uploadExtensionFilter).toEqual({ enabled: false, extensions: [] });
+    expect(normalizeSettings({}).downloadExtensionFilter).toEqual({ enabled: false, extensions: [] });
     expect(
       normalizeSettings({ uploadExtensionFilter: { enabled: 'yes', extensions: 'jpg' } })
         .uploadExtensionFilter,
+    ).toEqual({ enabled: false, extensions: [] });
+    expect(
+      normalizeSettings({ downloadExtensionFilter: { enabled: 'yes', extensions: 'pdf' } })
+        .downloadExtensionFilter,
     ).toEqual({ enabled: false, extensions: [] });
   });
 

@@ -28,8 +28,10 @@ export const dictionaries: Record<Locale, Dictionary> = {
     'settings.diffMaxBytes': '差分プレビュー上限（バイト）',
     'settings.uploadExtFilterEnabled': 'アップロードする拡張子を制限する',
     'settings.uploadExtFilterList': '許可する拡張子（カンマ区切り、例: jpg, png, pdf）',
+    'settings.downloadExtFilterEnabled': 'ダウンロードする拡張子を制限する',
+    'settings.downloadExtFilterList': '許可する拡張子（カンマ区切り、例: jpg, png, pdf）',
     'settings.note':
-      'バックアップは暗号化されずローカルに保存されます。資格情報を含むファイル（.env / wp-config.php 等）を扱う場合は保持日数を短くしてください。差分プレビュー上限を超えるファイルは文字差分を行わずサイズ比較のみ表示します。拡張子制限を有効にすると、許可リストにない拡張子のファイルはアップロードされません。',
+      'バックアップは暗号化されずローカルに保存されます。資格情報を含むファイル（.env / wp-config.php 等）を扱う場合は保持日数を短くしてください。差分プレビュー上限を超えるファイルは文字差分を行わずサイズ比較のみ表示します。拡張子制限を有効にすると、許可リストにない拡張子のファイルはアップロード/ダウンロードされません。',
     'settings.saved': '設定を保存しました',
     'btn.clearCompleted': '完了分をクリア',
     'profile.deleteConfirm': 'プロファイル {id} を削除します。よろしいですか？',
@@ -92,8 +94,10 @@ export const dictionaries: Record<Locale, Dictionary> = {
     'settings.diffMaxBytes': 'Diff preview limit (bytes)',
     'settings.uploadExtFilterEnabled': 'Restrict uploads to specific extensions',
     'settings.uploadExtFilterList': 'Allowed extensions (comma-separated, e.g. jpg, png, pdf)',
+    'settings.downloadExtFilterEnabled': 'Restrict downloads to specific extensions',
+    'settings.downloadExtFilterList': 'Allowed extensions (comma-separated, e.g. jpg, png, pdf)',
     'settings.note':
-      'Backups are stored locally without encryption. Keep the retention short when you edit files that carry credentials (.env, wp-config.php and the like). Files larger than the diff preview limit are shown as a size comparison instead of a character diff. When the extension restriction is enabled, files whose extension is not in the allow-list will not be uploaded.',
+      'Backups are stored locally without encryption. Keep the retention short when you edit files that carry credentials (.env, wp-config.php and the like). Files larger than the diff preview limit are shown as a size comparison instead of a character diff. When the extension restriction is enabled, files whose extension is not in the allow-list will not be uploaded/downloaded.',
     'settings.saved': 'Settings saved',
     'btn.clearCompleted': 'Clear finished',
     'profile.deleteConfirm': 'Delete profile {id}?',

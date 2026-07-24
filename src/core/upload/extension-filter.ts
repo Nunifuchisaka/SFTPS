@@ -44,8 +44,11 @@ export function hasAllowedExtension(fileName: string, extensions: string[]): boo
   return extensions.includes(extensionOf(fileName));
 }
 
-/** フィルタが無効なら常に許可、有効なら hasAllowedExtension に委譲する。 */
-export function isUploadAllowed(fileName: string, filter: ExtensionFilter): boolean {
+/**
+ * フィルタが無効なら常に許可、有効なら hasAllowedExtension に委譲する。
+ * アップロード/ダウンロードのどちらの許可判定にも使える汎用関数。
+ */
+export function isExtensionAllowed(fileName: string, filter: ExtensionFilter): boolean {
   if (!filter.enabled) return true;
   return hasAllowedExtension(fileName, filter.extensions);
 }

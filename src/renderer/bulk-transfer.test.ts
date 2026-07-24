@@ -5,6 +5,7 @@ import {
   buildRequestsFromDropTargets,
   buildDownloadRequestsFromTargets,
   filterUploadRequestsByExtension,
+  filterDownloadRequestsByExtension,
 } from './bulk-transfer';
 
 describe('buildUploadRequests', () => {
@@ -100,5 +101,46 @@ describe('buildDownloadRequestsFromTargets', () => {
       localDir: '/a/dir',
       label: 'download → /a/dir',
     });
+  });
+});
+
+describe('filterDownloadRequestsByExtension', () => {
+  const targets: DownloadDropTarget[] = [
+    { kind: 'download', sourcePath: '/pub/x.jpg', destPath: '/a/x.jpg' },
+    { kind: 'download', sourcePath: '/pub/y.exe', destPath: '/a/y.exe' },
+  ];
+  const reqs = buildDownloadRequestsFromTargets('p1', targets);
+
+  it('passes everything through when the filter is disabled', () => {
+    const { allowed, skipped } = filterDownloadRequestsByExtension(reqs, {
+      enabled: false,
+      extensions: ['jpg'],
+    });
+    expect(allowed).toEqual(reqs);
+    expect(skipped).toBe(0);
+  });
+
+  it('excludes download requests whose extension is not allowed and counts them', () => {
+    const { allowed, skipped } = filterDownloadRequestsByExtension(reqs, {
+      enabled: true,
+      extensions: ['jpg'],
+    });
+    expect(allowed.map((r) => r.label)).toEqual(['x.jpg']);
+    expect(skipped).toBe(1);
+  });
+
+  it('always passes through download-sync requests regardless of extension', () => {
+    const mixedTargets: DownloadDropTarget[] = [
+      { kind: 'download', sourcePath: '/pub/f.exe', destPath: '/a/f.exe' },
+      { kind: 'download-sync', sourcePath: '/pub/dir', destPath: '/a/dir' },
+    ];
+    const mixed = buildDownloadRequestsFromTargets('p1', mixedTargets);
+    const { allowed, skipped } = filterDownloadRequestsByExtension(mixed, {
+      enabled: true,
+      extensions: ['jpg'],
+    });
+    expect(allowed).toHaveLength(1);
+    expect(allowed[0].kind).toBe('download-sync');
+    expect(skipped).toBe(1);
   });
 });

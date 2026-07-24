@@ -312,9 +312,10 @@ export class AppService {
 
     return this.withTransport(id, async (source) => {
       const computeHash = options.compareBy === 'checksum';
+      const extensions = this.downloadExtensions();
       const dest = await this.openLocalSource(localDir);
-      const sourceEntries = await this.safeWalk(source, remoteDir, options.ignore, computeHash);
-      const destEntries = await walkTree(dest, '/', { ignore: options.ignore, computeHash });
+      const sourceEntries = await this.safeWalk(source, remoteDir, options.ignore, computeHash, extensions);
+      const destEntries = await walkTree(dest, '/', { ignore: options.ignore, computeHash, extensions });
       const plan = planSync(sourceEntries, destEntries, {
         compareBy: options.compareBy,
         deleteExtraneous: options.deleteExtraneous,
@@ -354,6 +355,12 @@ export class AppService {
   /** アップロード許可拡張子リスト（設定で無効なら undefined = 無制限）。 */
   private uploadExtensions(): string[] | undefined {
     const filter = this.settings().uploadExtensionFilter;
+    return filter.enabled ? filter.extensions : undefined;
+  }
+
+  /** ダウンロード許可拡張子リスト（設定で無効なら undefined = 無制限）。 */
+  private downloadExtensions(): string[] | undefined {
+    const filter = this.settings().downloadExtensionFilter;
     return filter.enabled ? filter.extensions : undefined;
   }
 

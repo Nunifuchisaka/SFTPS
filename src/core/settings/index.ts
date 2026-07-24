@@ -18,6 +18,12 @@ export interface AppSettings {
     /** 正規化済み拡張子リスト（小文字・先頭ドットなし）。空なら実質無制限。 */
     extensions: string[];
   };
+  /** ダウンロードを許可する拡張子の制限（有効時、リストにない拡張子はダウンロードされない）。 */
+  downloadExtensionFilter: {
+    enabled: boolean;
+    /** 正規化済み拡張子リスト（小文字・先頭ドットなし）。空なら実質無制限。 */
+    extensions: string[];
+  };
 }
 
 export const MIN_DIFF_MAX_BYTES = 1024;
@@ -29,6 +35,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   backup: { ...DEFAULT_BACKUP_RETENTION },
   diff: { maxBytes: DEFAULT_MAX_DIFF_BYTES },
   uploadExtensionFilter: { enabled: false, extensions: [] },
+  downloadExtensionFilter: { enabled: false, extensions: [] },
 };
 
 function record(value: unknown): Record<string, unknown> {
@@ -52,6 +59,7 @@ export function normalizeSettings(input: unknown): AppSettings {
   const backup = record(root['backup']);
   const diff = record(root['diff']);
   const uploadExtensionFilter = record(root['uploadExtensionFilter']);
+  const downloadExtensionFilter = record(root['downloadExtensionFilter']);
 
   const rawAge = backup['maxAgeDays'];
   const maxAgeDays =
@@ -81,6 +89,10 @@ export function normalizeSettings(input: unknown): AppSettings {
       enabled: uploadExtensionFilter['enabled'] === true,
       extensions: normalizeExtensionList(uploadExtensionFilter['extensions']),
     },
+    downloadExtensionFilter: {
+      enabled: downloadExtensionFilter['enabled'] === true,
+      extensions: normalizeExtensionList(downloadExtensionFilter['extensions']),
+    },
   };
 }
 
@@ -100,6 +112,10 @@ export function parseSettings(json: string): AppSettings {
       uploadExtensionFilter: {
         ...DEFAULT_SETTINGS.uploadExtensionFilter,
         extensions: [...DEFAULT_SETTINGS.uploadExtensionFilter.extensions],
+      },
+      downloadExtensionFilter: {
+        ...DEFAULT_SETTINGS.downloadExtensionFilter,
+        extensions: [...DEFAULT_SETTINGS.downloadExtensionFilter.extensions],
       },
     };
   }

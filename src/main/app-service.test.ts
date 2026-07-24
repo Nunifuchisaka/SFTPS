@@ -685,6 +685,7 @@ describe('AppService diff size limit', () => {
         backup: { maxGenerations: 20, maxAgeDays: null },
         diff: { maxBytes },
         uploadExtensionFilter: { enabled: false, extensions: [] },
+        downloadExtensionFilter: { enabled: false, extensions: [] },
       }),
     });
     await service.saveProfile(ftpProfile);
@@ -725,5 +726,83 @@ describe('AppService diff size limit', () => {
     const preview = await service.prepareUpload('p1', localPath, '/s.txt');
     expect(preview.tooLarge).toBeFalsy();
     expect(preview.summary).toEqual({ added: 1, removed: 1 });
+  });
+});
+
+describe('AppService extension filters', () => {
+  let dir: string;
+  let service: AppService;
+  let transport: LocalTransport;
+  let uploadFilter: { enabled: boolean; extensions: string[] };
+  let downloadFilter: { enabled: boolean; extensions: string[] };
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'sftps-extfilter-'));
+    transport = new LocalTransport(join(dir, 'remote'));
+    uploadFilter = { enabled: false, extensions: [] };
+    downloadFilter = { enabled: false, extensions: [] };
+    service = new AppService({
+      profileStore: new ProfileStore(join(dir, 'profiles.json')),
+      secretStore: new SecretStore({
+        safeStorage: new FakeSafeStorage(),
+        filePath: join(dir, 'secrets.json'),
+      }),
+      bookmarkStore: new BookmarkFile(join(dir, 'bookmarks.json')),
+      backupManager: new BackupManager({ backupRoot: join(dir, 'backups') }),
+      createTransport: () => transport,
+      settings: () => ({
+        backup: { maxGenerations: 20, maxAgeDays: null },
+        diff: { maxBytes: 1024 * 1024 },
+        uploadExtensionFilter: uploadFilter,
+        downloadExtensionFilter: downloadFilter,
+      }),
+    });
+    await service.saveProfile(ftpProfile);
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('commitSync only uploads allowed extensions, and does not delete a same-excluded extraneous remote file', async () => {
+    await transport.connect();
+    await transport.writeFile('/site/old.exe', Buffer.from('OLDEXE'));
+    const srcDir = join(dir, 'src');
+    await writeLocal(join(srcDir, 'a.txt'), Buffer.from('a'));
+    await writeLocal(join(srcDir, 'b.exe'), Buffer.from('b'));
+
+    uploadFilter = { enabled: true, extensions: ['txt'] };
+    const r = await service.commitSync('p1', srcDir, '/site', {
+      compareBy: 'size',
+      deleteExtraneous: true,
+    });
+
+    expect(r.result.uploaded).toBe(1);
+    expect(await transport.exists('/site/a.txt')).toBe(true);
+    expect(await transport.exists('/site/b.exe')).toBe(false);
+    // old.exe was excluded from both sides of the walk by the same filter, so it is
+    // never considered extraneous and must not be deleted.
+    expect(r.result.deleted).toBe(0);
+    expect(await transport.exists('/site/old.exe')).toBe(true);
+  });
+
+  it('commitDownloadSync only downloads allowed extensions, and does not delete a same-excluded extraneous local file', async () => {
+    await transport.connect();
+    await transport.writeFile('/site/a.txt', Buffer.from('a'));
+    await transport.writeFile('/site/b.exe', Buffer.from('b'));
+    const destDir = join(dir, 'dest');
+    await writeLocal(join(destDir, 'old.exe'), Buffer.from('OLDEXE'));
+
+    downloadFilter = { enabled: true, extensions: ['txt'] };
+    const r = await service.commitDownloadSync('p1', '/site', destDir, {
+      compareBy: 'size',
+      deleteExtraneous: true,
+    });
+
+    expect(r.result.uploaded).toBe(1);
+    expect(existsSync(join(destDir, 'a.txt'))).toBe(true);
+    expect(existsSync(join(destDir, 'b.exe'))).toBe(false);
+    expect(r.result.deleted).toBe(0);
+    expect(existsSync(join(destDir, 'old.exe'))).toBe(true);
   });
 });

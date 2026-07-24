@@ -1,7 +1,7 @@
 import type { TransferRequest } from '../shared/ipc';
 import type { DropTarget, DownloadDropTarget } from '../core/browse/index';
 import type { ExtensionFilter } from '../core/upload/extension-filter';
-import { isUploadAllowed } from '../core/upload/extension-filter';
+import { isExtensionAllowed } from '../core/upload/extension-filter';
 
 function baseName(p: string): string {
   const trimmed = p.replace(/[\\/]+$/, '');
@@ -67,7 +67,7 @@ export function filterUploadRequestsByExtension(
   let skipped = 0;
   const allowed = requests.filter((req) => {
     if (req.kind !== 'upload') return true;
-    const ok = isUploadAllowed(req.localPath, filter);
+    const ok = isExtensionAllowed(req.localPath, filter);
     if (!ok) skipped++;
     return ok;
   });
@@ -96,4 +96,22 @@ export function buildDownloadRequestsFromTargets(
           label: `download → ${t.destPath}`,
         },
   );
+}
+
+/**
+ * download 種別のリクエストだけに拡張子フィルタを適用し、対象外を除外する。
+ * download-sync 種別（フォルダ同期）はフォルダ側の walkTree が判定するのでそのまま通す。
+ */
+export function filterDownloadRequestsByExtension(
+  requests: TransferRequest[],
+  filter: ExtensionFilter,
+): { allowed: TransferRequest[]; skipped: number } {
+  let skipped = 0;
+  const allowed = requests.filter((req) => {
+    if (req.kind !== 'download') return true;
+    const ok = isExtensionAllowed(req.remotePath, filter);
+    if (!ok) skipped++;
+    return ok;
+  });
+  return { allowed, skipped };
 }

@@ -3,7 +3,7 @@ import {
   normalizeExtensionList,
   extensionOf,
   hasAllowedExtension,
-  isUploadAllowed,
+  isExtensionAllowed,
 } from './extension-filter';
 
 describe('normalizeExtensionList', () => {
@@ -58,13 +58,13 @@ describe('hasAllowedExtension', () => {
   });
 });
 
-describe('isUploadAllowed', () => {
+describe('isExtensionAllowed', () => {
   it('allows everything when the filter is disabled', () => {
-    expect(isUploadAllowed('script.exe', { enabled: false, extensions: ['jpg'] })).toBe(true);
+    expect(isExtensionAllowed('script.exe', { enabled: false, extensions: ['jpg'] })).toBe(true);
   });
 
   it('delegates to hasAllowedExtension when enabled', () => {
-    expect(isUploadAllowed('photo.jpg', { enabled: true, extensions: ['jpg'] })).toBe(true);
-    expect(isUploadAllowed('script.exe', { enabled: true, extensions: ['jpg'] })).toBe(false);
+    expect(isExtensionAllowed('photo.jpg', { enabled: true, extensions: ['jpg'] })).toBe(true);
+    expect(isExtensionAllowed('script.exe', { enabled: true, extensions: ['jpg'] })).toBe(false);
   });
 });

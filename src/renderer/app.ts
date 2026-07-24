@@ -36,6 +36,7 @@ import type {
   QueueStatus,
   SaveProfileOptions,
   SyncFolderOptions,
+  TransferRequest,
 } from '../shared/ipc';
 import { DEFAULT_SETTINGS } from '../core/settings/index';
 import { createDiffView, diffOrientationLabels } from './diff-view';
@@ -46,6 +47,7 @@ import {
   buildRequestsFromDropTargets,
   buildDownloadRequestsFromTargets,
   filterUploadRequestsByExtension,
+  filterDownloadRequestsByExtension,
 } from './bulk-transfer';
 import { normalizeExtensionList } from '../core/upload/extension-filter';
 import { attachDropZone, attachInternalDropZone, LOCAL_DRAG_MIME, REMOTE_DRAG_MIME } from './dnd';
@@ -532,14 +534,24 @@ export function mountApp(root: string | HTMLElement): void {
     const generationsIn = numberIn(state.settings.backup.maxGenerations);
     const ageIn = numberIn(state.settings.backup.maxAgeDays ?? 0);
     const diffIn = numberIn(state.settings.diff.maxBytes);
-    const extFilterEnabledIn = h('input', {
+    const uploadExtFilterEnabledIn = h('input', {
       type: 'checkbox',
       checked: state.settings.uploadExtensionFilter.enabled,
     }) as HTMLInputElement;
-    const extFilterListIn = h('input', {
+    const uploadExtFilterListIn = h('input', {
       class: 'form_1__input',
       type: 'text',
       value: state.settings.uploadExtensionFilter.extensions.join(', '),
+      placeholder: 'jpg, png, pdf',
+    }) as HTMLInputElement;
+    const downloadExtFilterEnabledIn = h('input', {
+      type: 'checkbox',
+      checked: state.settings.downloadExtensionFilter.enabled,
+    }) as HTMLInputElement;
+    const downloadExtFilterListIn = h('input', {
+      class: 'form_1__input',
+      type: 'text',
+      value: state.settings.downloadExtensionFilter.extensions.join(', '),
       placeholder: 'jpg, png, pdf',
     }) as HTMLInputElement;
 
@@ -549,8 +561,10 @@ export function mountApp(root: string | HTMLElement): void {
         h('label', {}, [`${t('settings.backupMaxGenerations')}: `, generationsIn]),
         h('label', {}, [`${t('settings.backupMaxAgeDays')}: `, ageIn]),
         h('label', {}, [`${t('settings.diffMaxBytes')}: `, diffIn]),
-        h('label', {}, [extFilterEnabledIn, ` ${t('settings.uploadExtFilterEnabled')}`]),
-        h('label', {}, [`${t('settings.uploadExtFilterList')}: `, extFilterListIn]),
+        h('label', {}, [uploadExtFilterEnabledIn, ` ${t('settings.uploadExtFilterEnabled')}`]),
+        h('label', {}, [`${t('settings.uploadExtFilterList')}: `, uploadExtFilterListIn]),
+        h('label', {}, [downloadExtFilterEnabledIn, ` ${t('settings.downloadExtFilterEnabled')}`]),
+        h('label', {}, [`${t('settings.downloadExtFilterList')}: `, downloadExtFilterListIn]),
       ]),
       h('div', { class: 'form_1__actions' }, [
         h(
@@ -566,8 +580,12 @@ export function mountApp(root: string | HTMLElement): void {
                 },
                 diff: { maxBytes: Number(diffIn.value) },
                 uploadExtensionFilter: {
-                  enabled: extFilterEnabledIn.checked,
-                  extensions: normalizeExtensionList(extFilterListIn.value.split(/[,\s]+/)),
+                  enabled: uploadExtFilterEnabledIn.checked,
+                  extensions: normalizeExtensionList(uploadExtFilterListIn.value.split(/[,\s]+/)),
+                },
+                downloadExtensionFilter: {
+                  enabled: downloadExtFilterEnabledIn.checked,
+                  extensions: normalizeExtensionList(downloadExtFilterListIn.value.split(/[,\s]+/)),
                 },
               }),
           },
@@ -1015,17 +1033,23 @@ export function mountApp(root: string | HTMLElement): void {
       return;
     }
     const dir = state.localDir || (await api.homeDir());
-    for (const remotePath of paths) {
+    const built: TransferRequest[] = paths.map((remotePath) => {
       const name = basename(remotePath);
-      await api.enqueueTransfer({
+      return {
         kind: 'download',
-        profileId: state.currentProfileId,
+        profileId: state.currentProfileId as string,
         remotePath,
         savePath: `${dir.replace(/[\\/]+$/, '')}/${name}`,
         label: name,
-      });
-    }
-    setStatus(`${paths.length}件をダウンロードキューに追加しました`);
+      };
+    });
+    const { allowed: requests, skipped } = filterDownloadRequestsByExtension(
+      built,
+      state.settings.downloadExtensionFilter,
+    );
+    for (const req of requests) await api.enqueueTransfer(req);
+    const skippedNote = skipped > 0 ? `（拡張子フィルタで${skipped}件除外）` : '';
+    setStatus(`${requests.length}件をダウンロードキューに追加しました${skippedNote}`);
     await refreshQueue();
   }
 
@@ -1091,10 +1115,15 @@ export function mountApp(root: string | HTMLElement): void {
     const entries = JSON.parse(data) as DragEntry[];
     if (entries.length === 0) return;
     const targets = resolveDownloadTargets(entries, state.localDir);
-    const requests = buildDownloadRequestsFromTargets(profileId, targets);
+    const built = buildDownloadRequestsFromTargets(profileId, targets);
+    const { allowed: requests, skipped } = filterDownloadRequestsByExtension(
+      built,
+      state.settings.downloadExtensionFilter,
+    );
     void (async () => {
       for (const req of requests) await api.enqueueTransfer(req);
-      setStatus(`${requests.length}件をドロップからダウンロードキューに追加しました`);
+      const skippedNote = skipped > 0 ? `（拡張子フィルタで${skipped}件除外）` : '';
+      setStatus(`${requests.length}件をドロップからダウンロードキューに追加しました${skippedNote}`);
       await refreshQueue();
       await loadLocal(state.localDir);
     })();
