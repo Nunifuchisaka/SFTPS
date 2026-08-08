@@ -42,9 +42,9 @@ describe('BookmarkFile', () => {
     expect(await readFile(filePath, 'utf8')).not.toContain('password');
   });
 
-  it('falls back to an empty store when the JSON is broken', async () => {
+  it('fails closed when the JSON is broken', async () => {
     const file = new BookmarkFile(join(dir, 'bookmarks.json'));
     await writeFile(join(dir, 'bookmarks.json'), 'not json', 'utf8');
-    expect((await file.load()).list()).toEqual([]);
+    await expect(file.load()).rejects.toThrow();
   });
 });

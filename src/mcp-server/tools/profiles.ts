@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { AppService } from '../../main/app-service';
 import { profileSchema, secretKeySchema } from '../schemas/profile';
 import { textResult } from '../tool-result';
+import { profileIdSchema } from '../schemas/common';
 
 export interface ProfileToolDeps {
   service: Pick<AppService, 'listProfiles' | 'saveProfile' | 'deleteProfile'>;
@@ -14,6 +15,7 @@ export function registerProfileTools(server: McpServer, deps: ProfileToolDeps): 
     'list_profiles',
     {
       description: '登録済みの接続プロファイル一覧を返す（パスワード等のシークレットは含まれない）。',
+      annotations: { readOnlyHint: true, destructiveHint: false },
     },
     async () => textResult(await deps.service.listProfiles()),
   );
@@ -30,6 +32,7 @@ export function registerProfileTools(server: McpServer, deps: ProfileToolDeps): 
         profile: profileSchema,
         clearSecrets: z.array(secretKeySchema).optional(),
       },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
     },
     async ({ profile, clearSecrets }) =>
       textResult(
@@ -45,10 +48,11 @@ export function registerProfileTools(server: McpServer, deps: ProfileToolDeps): 
         'removeRelatedData=true でブックマーク・履歴・信頼済みホスト鍵も削除、' +
         'removeBackups=true でバックアップ（復旧手段）も削除する（既定はどちらも削除しない）。',
       inputSchema: {
-        id: z.string(),
+        id: profileIdSchema,
         removeRelatedData: z.boolean().optional(),
         removeBackups: z.boolean().optional(),
       },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
     },
     async ({ id, removeRelatedData, removeBackups }) =>
       textResult(

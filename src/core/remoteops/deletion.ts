@@ -1,5 +1,31 @@
 import type { RemoteEntry } from '../transport/index';
 
+/**
+ * FTP の removeDir('/') は接続先全体を再帰削除するため、削除APIへ渡してはならない
+ * ルート相当パスを判定する。`.` / `..` を解決した結果がルートになる表現も拒否する。
+ */
+export function isDangerousRemoteDeletionTarget(remotePath: string): boolean {
+  if (typeof remotePath !== 'string' || remotePath.trim() === '') return true;
+  const segments = remotePath.trim().replace(/\\/g, '/').split('/');
+  const resolved: string[] = [];
+  for (const segment of segments) {
+    if (segment === '' || segment === '.') continue;
+    if (segment === '..') {
+      if (resolved.length === 0) return true;
+      resolved.pop();
+      continue;
+    }
+    resolved.push(segment);
+  }
+  return resolved.length === 0;
+}
+
+export function assertSafeRemoteDeletionTarget(remotePath: string): void {
+  if (isDangerousRemoteDeletionTarget(remotePath)) {
+    throw new Error('refusing to delete the remote root or an empty remote path');
+  }
+}
+
 export interface DeletionConfirm {
   requiresConfirm: boolean;
   message: string;

@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import path from 'node:path';
 import { parseNameStatus } from '../core/release/index';
 
 const execFileAsync = promisify(execFile);
@@ -65,6 +66,25 @@ export async function createReleaseZip(
   savePath: string,
   deps: GitReleaseDeps = defaultGitReleaseDeps,
 ): Promise<void> {
+  if (files.length === 0) throw new Error('at least one changed file must be selected');
+  const actualRoot = await findGitRoot(repoRoot, deps);
+  if (path.resolve(actualRoot) !== path.resolve(repoRoot)) {
+    throw new Error('repoRoot must be the detected git repository root');
+  }
+  const prepared = await prepareReleaseDiff(repoRoot, deps);
+  const allowed = new Set(prepared.files);
+  for (const file of files) {
+    const normalized = file.replace(/\\/g, '/');
+    if (
+      normalized === '' ||
+      normalized.startsWith('/') ||
+      /^[A-Za-z]:\//.test(normalized) ||
+      normalized.split('/').some((segment) => segment === '..') ||
+      !allowed.has(file)
+    ) {
+      throw new Error(`file is not in the confirmed release diff: ${file}`);
+    }
+  }
   await deps.execFile('git', ['archive', 'HEAD', '-o', savePath, '--', ...files], {
     cwd: repoRoot,
   });

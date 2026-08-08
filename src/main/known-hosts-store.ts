@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { KnownHostsStore, parseKnownHosts, serializeKnownHosts } from '../core/hostkey/index';
 import { writeFileAtomic } from './atomic-write';
+import { isFileNotFound } from './file-errors';
 
 /**
  * known_hosts の読み込みに失敗したことを表す。
@@ -15,10 +16,6 @@ export class KnownHostsLoadError extends Error {
     super(`failed to load known_hosts: ${filePath}`);
     this.name = 'KnownHostsLoadError';
   }
-}
-
-function isNotFound(err: unknown): boolean {
-  return (err as { code?: unknown } | null)?.code === 'ENOENT';
 }
 
 /**
@@ -37,7 +34,7 @@ export class KnownHostsFile {
     try {
       raw = await readFile(this.filePath, 'utf8');
     } catch (err) {
-      if (isNotFound(err)) return new KnownHostsStore();
+      if (isFileNotFound(err)) return new KnownHostsStore();
       throw new KnownHostsLoadError(this.filePath, err);
     }
     try {

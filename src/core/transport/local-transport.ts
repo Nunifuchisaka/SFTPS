@@ -60,6 +60,15 @@ export class LocalTransport implements RemoteTransport {
     }
   }
 
+  async directoryExists(remotePath: string): Promise<boolean> {
+    try {
+      return (await stat(this.resolve(remotePath))).isDirectory();
+    } catch (err) {
+      if ((err as { code?: unknown }).code === 'ENOENT') return false;
+      throw err;
+    }
+  }
+
   async delete(remotePath: string): Promise<void> {
     await rm(this.resolve(remotePath), { recursive: true, force: true });
   }

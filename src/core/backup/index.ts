@@ -1,4 +1,5 @@
 import { mkdir, readdir, readFile, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import type { RemoteTransport } from '../transport/types';
 import {
@@ -36,9 +37,12 @@ export interface BackupInfo {
 
 const STAMP_RE = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})-(\d{3})$/;
 
-/** Windows で使用できない文字（\ / : * ? " < > |）をアンダースコアに置き換える。 */
+/**
+ * リモートパスを固定長・衝突耐性のあるディレクトリキーへ変換する。
+ * 旧来の文字置換は `/a/b` と `/a_b` が衝突するため使用しない。
+ */
 export function sanitizeRemotePath(remotePath: string): string {
-  return remotePath.replace(/[\\/:*?"<>|]/g, '_');
+  return `v2_${createHash('sha256').update(remotePath, 'utf8').digest('hex')}`;
 }
 
 /** バックアップ名前空間の 1 セグメントを、ディレクトリ名として安全な形に丸める。 */

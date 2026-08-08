@@ -169,6 +169,10 @@ async function boot(): Promise<void> {
     prepareReleaseDiff: (localDir: string) => prepareReleaseDiff(localDir),
     createReleaseZip: (repoRoot: string, files: string[], savePath: string) =>
       createReleaseZip(repoRoot, files, savePath),
+  }, {
+    isTrustedSender: (event) =>
+      event.senderFrame === event.sender.mainFrame &&
+      isAllowedNavigation(event.senderFrame.url, navigationPolicy()),
   });
 
   createWindow();

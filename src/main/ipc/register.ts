@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron';
+import { ipcMain, type IpcMainInvokeEvent } from 'electron';
 import {
   IPC,
   type DeleteProfileOptions,
@@ -10,6 +10,7 @@ import type { Profile } from '../../core/profile/index';
 import type { HistoryFilter } from '../../core/history/index';
 import type { BookmarkInput } from '../../core/bookmark/index';
 import { createIpcHandlers, type IpcHandlerDeps, type IpcHandlers } from './handlers';
+import { ipcSchemas } from './schemas';
 
 export type {
   HistoryController,
@@ -25,85 +26,167 @@ export type {
  * ハンドラ（createIpcHandlers）を ipcMain.handle へ結線するだけの層。
  * ここにはロジックを置かない（置くとテストできなくなる）。
  */
-export function registerIpc(deps: IpcHandlerDeps): IpcHandlers {
+export interface RegisterIpcOptions {
+  isTrustedSender(event: IpcMainInvokeEvent): boolean;
+}
+
+export function registerIpc(deps: IpcHandlerDeps, options: RegisterIpcOptions): IpcHandlers {
   const h = createIpcHandlers(deps);
+  const handle = <TArgs extends unknown[], TResult>(
+    channel: string,
+    listener: (...args: TArgs) => TResult,
+  ): void => {
+    ipcMain.handle(channel, (event, ...args) => {
+      if (!options.isTrustedSender(event)) throw new Error('untrusted IPC sender');
+      return listener(...(args as TArgs));
+    });
+  };
 
-  ipcMain.handle(IPC.enqueueTransfer, (_e, request: TransferRequest) => h.enqueueTransfer(request));
-  ipcMain.handle(IPC.queueStatus, () => h.queueStatus());
-  ipcMain.handle(IPC.cancelAllTasks, () => h.cancelAllTasks());
-  ipcMain.handle(IPC.clearCompletedTasks, () => h.clearCompletedTasks());
-  ipcMain.handle(IPC.historyList, (_e, filter?: HistoryFilter) => h.historyList(filter));
-  ipcMain.handle(IPC.historyClear, () => h.historyClear());
+  handle(IPC.enqueueTransfer, (request: unknown) =>
+    h.enqueueTransfer(ipcSchemas.transferRequest.parse(request) as TransferRequest),
+  );
+  handle(IPC.queueStatus, () => h.queueStatus());
+  handle(IPC.cancelAllTasks, () => h.cancelAllTasks());
+  handle(IPC.clearCompletedTasks, () => h.clearCompletedTasks());
+  handle(IPC.historyList, (filter?: unknown) =>
+    h.historyList(ipcSchemas.historyFilter.parse(filter) as HistoryFilter | undefined),
+  );
+  handle(IPC.historyClear, () => h.historyClear());
 
-  ipcMain.handle(IPC.listProfiles, () => h.listProfiles());
-  ipcMain.handle(IPC.saveProfile, (_e, input: Profile, options?: SaveProfileOptions) =>
-    h.saveProfile(input, options),
+  handle(IPC.listProfiles, () => h.listProfiles());
+  handle(IPC.saveProfile, (input: unknown, saveOptions?: unknown) =>
+    h.saveProfile(
+      ipcSchemas.profile.parse(input) as Profile,
+      ipcSchemas.saveProfileOptions.parse(saveOptions) as SaveProfileOptions | undefined,
+    ),
   );
-  ipcMain.handle(IPC.deleteProfile, (_e, id: string, options?: DeleteProfileOptions) =>
-    h.deleteProfile(id, options),
+  handle(IPC.deleteProfile, (id: unknown, deleteOptions?: unknown) =>
+    h.deleteProfile(
+      ipcSchemas.profileId.parse(id),
+      ipcSchemas.deleteProfileOptions.parse(deleteOptions) as DeleteProfileOptions | undefined,
+    ),
   );
-  ipcMain.handle(IPC.getProfileDefaults, () => h.getProfileDefaults());
-  ipcMain.handle(IPC.getSettings, () => h.getSettings());
-  ipcMain.handle(IPC.saveSettings, (_e, settings: unknown) => h.saveSettings(settings));
+  handle(IPC.getProfileDefaults, () => h.getProfileDefaults());
+  handle(IPC.getSettings, () => h.getSettings());
+  handle(IPC.saveSettings, (settings: unknown) => h.saveSettings(settings));
 
-  ipcMain.handle(IPC.testConnection, (_e, id: string) => h.testConnection(id));
-  ipcMain.handle(IPC.listRemote, (_e, id: string, dir: string) => h.listRemote(id, dir));
-  ipcMain.handle(IPC.prepareUpload, (_e, id: string, local: string, remote: string) =>
-    h.prepareUpload(id, local, remote),
+  handle(IPC.testConnection, (id: unknown) => h.testConnection(ipcSchemas.profileId.parse(id)));
+  handle(IPC.listRemote, (id: unknown, dir: unknown) =>
+    h.listRemote(ipcSchemas.profileId.parse(id), ipcSchemas.remotePath.parse(dir)),
   );
-  ipcMain.handle(
+  handle(IPC.prepareUpload, (id: unknown, local: unknown, remote: unknown) =>
+    h.prepareUpload(
+      ipcSchemas.profileId.parse(id),
+      ipcSchemas.localPath.parse(local),
+      ipcSchemas.remotePath.parse(remote),
+    ),
+  );
+  handle(
     IPC.commitUpload,
-    (_e, id: string, local: string, remote: string, options?: { verifyAfterTransfer?: boolean }) =>
-      h.commitUpload(id, local, remote, options),
+    (id: unknown, local: unknown, remote: unknown, commitOptions?: unknown) =>
+      h.commitUpload(
+        ipcSchemas.profileId.parse(id),
+        ipcSchemas.localPath.parse(local),
+        ipcSchemas.remotePath.parse(remote),
+        ipcSchemas.commitOptions.parse(commitOptions),
+      ),
   );
-  ipcMain.handle(
+  handle(
     IPC.prepareSync,
-    (_e, id: string, localDir: string, remoteDir: string, options?: SyncFolderOptions) =>
-      h.prepareSync(id, localDir, remoteDir, options),
+    (id: unknown, localDir: unknown, remoteDir: unknown, syncOptions?: unknown) =>
+      h.prepareSync(
+        ipcSchemas.profileId.parse(id),
+        ipcSchemas.localPath.parse(localDir),
+        ipcSchemas.remotePath.parse(remoteDir),
+        ipcSchemas.syncOptions.parse(syncOptions) as SyncFolderOptions | undefined,
+      ),
   );
-  ipcMain.handle(
+  handle(
     IPC.commitSync,
-    (_e, id: string, localDir: string, remoteDir: string, options?: SyncFolderOptions) =>
-      h.commitSync(id, localDir, remoteDir, options),
+    (id: unknown, localDir: unknown, remoteDir: unknown, syncOptions?: unknown) =>
+      h.commitSync(
+        ipcSchemas.profileId.parse(id),
+        ipcSchemas.localPath.parse(localDir),
+        ipcSchemas.remotePath.parse(remoteDir),
+        ipcSchemas.syncOptions.parse(syncOptions) as SyncFolderOptions | undefined,
+      ),
   );
-  ipcMain.handle(IPC.prepareDownload, (_e, id: string, remote: string, save: string) =>
-    h.prepareDownload(id, remote, save),
+  handle(IPC.prepareDownload, (id: unknown, remote: unknown, save: unknown) =>
+    h.prepareDownload(
+      ipcSchemas.profileId.parse(id),
+      ipcSchemas.remotePath.parse(remote),
+      ipcSchemas.localPath.parse(save),
+    ),
   );
-  ipcMain.handle(IPC.download, (_e, id: string, remote: string, save: string) =>
-    h.download(id, remote, save),
+  handle(IPC.download, (id: unknown, remote: unknown, save: unknown) =>
+    h.download(
+      ipcSchemas.profileId.parse(id),
+      ipcSchemas.remotePath.parse(remote),
+      ipcSchemas.localPath.parse(save),
+    ),
   );
-  ipcMain.handle(IPC.renameRemote, (_e, id: string, from: string, to: string) =>
-    h.renameRemote(id, from, to),
+  handle(IPC.renameRemote, (id: unknown, from: unknown, to: unknown) =>
+    h.renameRemote(
+      ipcSchemas.profileId.parse(id),
+      ipcSchemas.remotePath.parse(from),
+      ipcSchemas.remotePath.parse(to),
+    ),
   );
-  ipcMain.handle(IPC.deleteRemote, (_e, id: string, remote: string) => h.deleteRemote(id, remote));
-  ipcMain.handle(IPC.chmodRemote, (_e, id: string, remote: string, mode: number) =>
-    h.chmodRemote(id, remote, mode),
+  handle(IPC.deleteRemote, (id: unknown, remote: unknown) =>
+    h.deleteRemote(ipcSchemas.profileId.parse(id), ipcSchemas.remotePath.parse(remote)),
+  );
+  handle(IPC.chmodRemote, (id: unknown, remote: unknown, mode: unknown) =>
+    h.chmodRemote(
+      ipcSchemas.profileId.parse(id),
+      ipcSchemas.remotePath.parse(remote),
+      ipcSchemas.mode.parse(mode),
+    ),
   );
 
-  ipcMain.handle(IPC.listBookmarks, (_e, profileId?: string) => h.listBookmarks(profileId));
-  ipcMain.handle(IPC.addBookmark, (_e, input: BookmarkInput) => h.addBookmark(input));
-  ipcMain.handle(IPC.removeBookmark, (_e, id: string) => h.removeBookmark(id));
-  ipcMain.handle(IPC.renameBookmark, (_e, id: string, name: string) => h.renameBookmark(id, name));
-  ipcMain.handle(IPC.listBackups, (_e, id: string, remote: string) => h.listBackups(id, remote));
-  ipcMain.handle(IPC.restoreBackup, (_e, id: string, remote: string, ts?: Date) =>
-    h.restoreBackup(id, remote, ts),
+  handle(IPC.listBookmarks, (profileId?: unknown) =>
+    h.listBookmarks(profileId === undefined ? undefined : ipcSchemas.profileId.parse(profileId)),
   );
-  ipcMain.handle(IPC.listKnownHosts, () => h.listKnownHosts());
-  ipcMain.handle(IPC.removeKnownHost, (_e, host: string, port: number) =>
-    h.removeKnownHost(host, port),
+  handle(IPC.addBookmark, (input: unknown) =>
+    h.addBookmark(ipcSchemas.bookmark.parse(input) as BookmarkInput),
+  );
+  handle(IPC.removeBookmark, (id: unknown) => h.removeBookmark(ipcSchemas.shortText.parse(id)));
+  handle(IPC.renameBookmark, (id: unknown, name: unknown) =>
+    h.renameBookmark(ipcSchemas.shortText.parse(id), ipcSchemas.shortText.parse(name)),
+  );
+  handle(IPC.listBackups, (id: unknown, remote: unknown) =>
+    h.listBackups(ipcSchemas.profileId.parse(id), ipcSchemas.remotePath.parse(remote)),
+  );
+  handle(IPC.restoreBackup, (id: unknown, remote: unknown, ts?: unknown) =>
+    h.restoreBackup(
+      ipcSchemas.profileId.parse(id),
+      ipcSchemas.remotePath.parse(remote),
+      ts === undefined ? undefined : ipcSchemas.timestamp.parse(ts),
+    ),
+  );
+  handle(IPC.listKnownHosts, () => h.listKnownHosts());
+  handle(IPC.removeKnownHost, (host: unknown, port: unknown) =>
+    h.removeKnownHost(ipcSchemas.host.parse(host), ipcSchemas.port.parse(port)),
   );
 
-  ipcMain.handle(IPC.isSecretStorageAvailable, () => h.isSecretStorageAvailable());
-  ipcMain.handle(IPC.listLocal, (_e, dir: string) => h.listLocal(dir));
-  ipcMain.handle(IPC.isDirectory, (_e, p: string) => h.isDirectory(p));
-  ipcMain.handle(IPC.homeDir, () => h.homeDir());
-  ipcMain.handle(IPC.pickFile, () => h.pickFile());
-  ipcMain.handle(IPC.pickDirectory, () => h.pickDirectory());
-  ipcMain.handle(IPC.pickSavePath, (_e, defaultName: string) => h.pickSavePath(defaultName));
+  handle(IPC.isSecretStorageAvailable, () => h.isSecretStorageAvailable());
+  handle(IPC.listLocal, (dir: unknown) => h.listLocal(ipcSchemas.localPath.parse(dir)));
+  handle(IPC.isDirectory, (p: unknown) => h.isDirectory(ipcSchemas.localPath.parse(p)));
+  handle(IPC.homeDir, () => h.homeDir());
+  handle(IPC.pickFile, () => h.pickFile());
+  handle(IPC.pickDirectory, () => h.pickDirectory());
+  handle(IPC.pickSavePath, (defaultName: unknown) =>
+    h.pickSavePath(ipcSchemas.shortText.parse(defaultName)),
+  );
 
-  ipcMain.handle(IPC.prepareReleaseDiff, (_e, localDir: string) => h.prepareReleaseDiff(localDir));
-  ipcMain.handle(IPC.createReleaseZip, (_e, repoRoot: string, files: string[], savePath: string) =>
-    h.createReleaseZip(repoRoot, files, savePath),
+  handle(IPC.prepareReleaseDiff, (localDir: unknown) =>
+    h.prepareReleaseDiff(ipcSchemas.localPath.parse(localDir)),
+  );
+  handle(IPC.createReleaseZip, (repoRoot: unknown, files: unknown, savePath: unknown) =>
+    h.createReleaseZip(
+      ipcSchemas.localPath.parse(repoRoot),
+      ipcSchemas.stringArray.parse(files),
+      ipcSchemas.localPath.parse(savePath),
+    ),
   );
 
   return h;

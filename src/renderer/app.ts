@@ -1391,18 +1391,18 @@ export function mountApp(root: string | HTMLElement): void {
   async function confirmSyncPlan(
     remoteDir: string,
     options: SyncFolderOptions,
-  ): Promise<boolean> {
-    if (!checkSyncDestination(remoteDir, options)) return false;
+  ): Promise<PrepareSyncResult | null> {
+    if (!checkSyncDestination(remoteDir, options)) return null;
     const prepared = await planSyncNow(remoteDir, options);
-    if (!prepared) return false;
+    if (!prepared) return null;
 
     const deletion = confirmMirrorDeletion(prepared.plan, remoteDir);
     if (deletion.requiresConfirm) {
       if (!window.confirm(deletion.message)) {
         setStatus('同期を中止しました');
-        return false;
+        return null;
       }
-      return true;
+      return prepared;
     }
 
     const s = prepared.summary;
@@ -1410,7 +1410,7 @@ export function mountApp(root: string | HTMLElement): void {
       `「${remoteDir}」へ同期します（アップロード ${s.upload} / 新規dir ${s.createDir} / スキップ ${s.skip}）。実行してよろしいですか？`,
     );
     if (!ok) setStatus('同期を中止しました');
-    return ok;
+    return ok ? prepared : null;
   }
 
   async function runSyncNow(remoteDir: string, options: SyncFolderOptions): Promise<void> {
@@ -1418,10 +1418,14 @@ export function mountApp(root: string | HTMLElement): void {
       setStatus('プロファイルとローカルフォルダが必要です', true);
       return;
     }
-    if (!(await confirmSyncPlan(remoteDir, options))) return;
+    const prepared = await confirmSyncPlan(remoteDir, options);
+    if (!prepared) return;
 
     const r = await guard('同期実行', () =>
-      api.commitSync(state.currentProfileId as string, state.syncLocalDir as string, remoteDir, options),
+      api.commitSync(state.currentProfileId as string, state.syncLocalDir as string, remoteDir, {
+        ...options,
+        expectedPlanToken: prepared.planToken,
+      }),
     );
     if (r) {
       const s = r.result;
@@ -1455,13 +1459,14 @@ export function mountApp(root: string | HTMLElement): void {
       return;
     }
     // キュー経由でも同じプレビュー＋確認を通す（無確認のミラー削除を作らない）。
-    if (!(await confirmSyncPlan(remoteDir, options))) return;
+    const prepared = await confirmSyncPlan(remoteDir, options);
+    if (!prepared) return;
     await api.enqueueTransfer({
       kind: 'sync',
       profileId: state.currentProfileId,
       localDir: state.syncLocalDir,
       remoteDir,
-      options,
+      options: { ...options, expectedPlanToken: prepared.planToken },
       label: `sync → ${remoteDir}`,
     });
     setStatus('フォルダ同期をキューに追加しました');

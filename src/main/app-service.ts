@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { LocalTransport, type RemoteEntry, type RemoteTransport } from '../core/transport/index';
 import type { BackupInfo, BackupManager } from '../core/backup/index';
 import {
@@ -7,7 +8,6 @@ import {
   summarizePlan,
   runSync,
   validateSyncDestination,
-  type SyncEntry,
 } from '../core/sync/index';
 import { establishConnection, type ReconnectOptions } from '../core/reconnect/index';
 import {
@@ -29,13 +29,16 @@ import {
 import {
   prepareDownload as corePrepareDownload,
   commitDownload as coreCommitDownload,
+  downloadBackupKey,
   type DownloadPreview,
   type DownloadResult,
 } from '../core/download/index';
+import { assertSafeRemoteDeletionTarget } from '../core/remoteops/index';
 import type { Bookmark, BookmarkInput, BookmarkStore } from '../core/bookmark/index';
 import type { SecretStore } from './secret-store';
 import type { ProfileStore } from './profile-store';
 import type { Secrets } from './transport-factory';
+import { MutationQueue } from './mutation-queue';
 import type {
   ConnectionResult,
   DeleteProfileOptions,
@@ -58,6 +61,13 @@ function sameSecrets(a: Record<string, string>, b: Record<string, string>): bool
   const keysB = Object.keys(b);
   if (keysA.length !== keysB.length) return false;
   return keysA.every((k) => a[k] === b[k]);
+}
+
+function syncPlanToken(plan: ReturnType<typeof planSync>): string {
+  const canonical = [...plan].sort(
+    (a, b) => a.path.localeCompare(b.path) || a.type.localeCompare(b.type),
+  );
+  return createHash('sha256').update(JSON.stringify(canonical), 'utf8').digest('hex');
 }
 
 /** ブックマークの読み書き口（実体は JSON ファイル永続化）。 */
@@ -98,9 +108,13 @@ export type { DeleteProfileOptions, DeleteProfileResult };
  * Electron / ipcMain には依存せず、単体テスト可能な形で全機能を提供する。
  */
 export class AppService {
+  private readonly profileMutations = new MutationQueue();
+  private readonly bookmarkMutations = new MutationQueue();
+
   constructor(private readonly deps: AppServiceDeps) {}
 
   async listProfiles(): Promise<Profile[]> {
+    await this.profileMutations.idle();
     return this.deps.profileStore.list();
   }
 
@@ -111,6 +125,13 @@ export class AppService {
    * シークレットの書き込みが必要なのに暗号化が使えない場合は保存を拒否する（例外）。
    */
   async saveProfile(input: Profile, options: SaveProfileOptions = {}): Promise<Profile> {
+    return this.profileMutations.run(() => this.saveProfileUnlocked(input, options));
+  }
+
+  private async saveProfileUnlocked(
+    input: Profile,
+    options: SaveProfileOptions,
+  ): Promise<Profile> {
     const errors = validateProfile(input);
     if (errors.length > 0) {
       throw new Error(`invalid profile: ${errors.join(', ')}`);
@@ -118,21 +139,33 @@ export class AppService {
 
     const existing = (await this.deps.secretStore.getSecrets(input.id)) ?? {};
     const merged = mergeSecrets(existing, extractSecrets(input), options.clearSecrets ?? []);
-    if (!sameSecrets(existing, merged)) {
-      if (Object.keys(merged).length === 0) {
-        await this.deps.secretStore.deleteSecrets(input.id);
-      } else {
-        // 暗号化が使えなければここで例外 → プロファイルは永続化されない。
-        await this.deps.secretStore.setSecrets(input.id, merged);
-      }
-    }
-
     const stripped = stripSecrets(input);
     const profiles = await this.deps.profileStore.list();
     const next = profiles.filter((p) => p.id !== input.id);
     next.push(stripped);
-    await this.deps.profileStore.saveAll(next);
+    const secretsChanged = !sameSecrets(existing, merged);
+    if (secretsChanged) await this.replaceSecrets(input.id, merged);
+    try {
+      await this.deps.profileStore.saveAll(next);
+    } catch (err) {
+      if (secretsChanged) {
+        try {
+          await this.replaceSecrets(input.id, existing);
+        } catch (rollbackErr) {
+          throw new AggregateError(
+            [err, rollbackErr],
+            'profile save failed and secret rollback also failed',
+          );
+        }
+      }
+      throw err;
+    }
     return stripped;
+  }
+
+  private async replaceSecrets(id: string, secrets: Record<string, string>): Promise<void> {
+    if (Object.keys(secrets).length === 0) await this.deps.secretStore.deleteSecrets(id);
+    else await this.deps.secretStore.setSecrets(id, secrets);
   }
 
   /**
@@ -143,6 +176,13 @@ export class AppService {
   async deleteProfile(
     id: string,
     options: DeleteProfileOptions = {},
+  ): Promise<DeleteProfileResult> {
+    return this.profileMutations.run(() => this.deleteProfileUnlocked(id, options));
+  }
+
+  private async deleteProfileUnlocked(
+    id: string,
+    options: DeleteProfileOptions,
   ): Promise<DeleteProfileResult> {
     const profiles = await this.deps.profileStore.list();
     // 不正な id はここで弾く（消し込み対象がパスとして使われるため、着手前に検証する）。
@@ -156,7 +196,19 @@ export class AppService {
     });
 
     await this.deps.profileStore.saveAll(profiles.filter((p) => p.id !== id));
-    await this.deps.secretStore.deleteSecrets(id);
+    try {
+      await this.deps.secretStore.deleteSecrets(id);
+    } catch (err) {
+      try {
+        await this.deps.profileStore.saveAll(profiles);
+      } catch (rollbackErr) {
+        throw new AggregateError(
+          [err, rollbackErr],
+          'profile deletion failed and profile rollback also failed',
+        );
+      }
+      throw err;
+    }
 
     const result: DeleteProfileResult = {
       removedBookmarks: 0,
@@ -166,9 +218,12 @@ export class AppService {
     };
 
     if (plan.removeBookmarks) {
-      const store = await this.deps.bookmarkStore.load();
-      result.removedBookmarks = store.removeByProfile(id);
-      if (result.removedBookmarks > 0) await this.deps.bookmarkStore.save(store);
+      result.removedBookmarks = await this.bookmarkMutations.run(async () => {
+        const store = await this.deps.bookmarkStore.load();
+        const removed = store.removeByProfile(id);
+        if (removed > 0) await this.deps.bookmarkStore.save(store);
+        return removed;
+      });
     }
     if (plan.removeHistory) {
       result.removedHistory = this.deps.historyStore?.removeByProfile(id) ?? 0;
@@ -234,12 +289,17 @@ export class AppService {
       const computeHash = options.compareBy === 'checksum';
       const source = await this.openLocalSource(localDir);
       const sourceEntries = await walkTree(source, '/', { ignore: options.ignore, computeHash });
-      const destEntries = await this.safeWalk(dest, remoteDir, options.ignore, computeHash);
+      const destinationExists = dest.directoryExists
+        ? await dest.directoryExists(remoteDir)
+        : true;
+      const destEntries = destinationExists
+        ? await walkTree(dest, remoteDir, { ignore: options.ignore, computeHash })
+        : [];
       const plan = planSync(sourceEntries, destEntries, {
         compareBy: options.compareBy,
         deleteExtraneous: options.deleteExtraneous,
       });
-      return { plan, summary: summarizePlan(plan) };
+      return { plan, summary: summarizePlan(plan), planToken: syncPlanToken(plan) };
     });
   }
 
@@ -273,11 +333,21 @@ export class AppService {
       const source = await this.openLocalSource(localDir);
       await dest.mkdir(remoteDir);
       const sourceEntries = await walkTree(source, '/', { ignore: options.ignore, computeHash });
-      const destEntries = await this.safeWalk(dest, remoteDir, options.ignore, computeHash);
+      const destEntries = await walkTree(dest, remoteDir, { ignore: options.ignore, computeHash });
       const plan = planSync(sourceEntries, destEntries, {
         compareBy: options.compareBy,
         deleteExtraneous: options.deleteExtraneous,
       });
+      const actualPlanToken = syncPlanToken(plan);
+      if (options.deleteExtraneous && options.expectedPlanToken === undefined) {
+        throw new Error('mirror deletion requires a confirmed sync plan token');
+      }
+      if (
+        options.expectedPlanToken !== undefined &&
+        options.expectedPlanToken !== actualPlanToken
+      ) {
+        throw new Error('sync plan changed after confirmation; preview and confirm it again');
+      }
       const result = await runSync(source, dest, plan, {
         backupManager: this.deps.backupManager,
         profileId: id,
@@ -301,6 +371,10 @@ export class AppService {
     options: SyncFolderOptions = {},
     signal?: AbortSignal,
   ): Promise<CommitSyncResult> {
+    const localRoot = path.parse(path.resolve(localDir)).root;
+    if (options.deleteExtraneous && path.resolve(localDir) === localRoot) {
+      throw new Error('mirror download cannot target the local filesystem root');
+    }
     if (signal?.aborted) {
       return {
         result: { uploaded: 0, createdDirs: 0, skipped: 0, deleted: 0, backups: [], canceled: true },
@@ -311,7 +385,7 @@ export class AppService {
     return this.withTransport(id, async (source) => {
       const computeHash = options.compareBy === 'checksum';
       const dest = await this.openLocalSource(localDir);
-      const sourceEntries = await this.safeWalk(source, remoteDir, options.ignore, computeHash);
+      const sourceEntries = await walkTree(source, remoteDir, { ignore: options.ignore, computeHash });
       const destEntries = await walkTree(dest, '/', { ignore: options.ignore, computeHash });
       const plan = planSync(sourceEntries, destEntries, {
         compareBy: options.compareBy,
@@ -319,7 +393,7 @@ export class AppService {
       });
       const result = await runSync(source, dest, plan, {
         backupManager: this.deps.backupManager,
-        profileId: id,
+        profileId: downloadBackupKey(id),
         sourceBase: remoteDir,
         destBase: '/',
         ...(signal ? { signal } : {}),
@@ -332,20 +406,6 @@ export class AppService {
     const source = new LocalTransport(localDir);
     await source.connect();
     return source;
-  }
-
-  private async safeWalk(
-    transport: RemoteTransport,
-    dir: string,
-    ignore?: string[],
-    computeHash?: boolean,
-  ): Promise<SyncEntry[]> {
-    try {
-      return await walkTree(transport, dir, { ignore, computeHash });
-    } catch {
-      // リモート側にディレクトリがまだ存在しない場合は空とみなす。
-      return [];
-    }
   }
 
   /** ダウンロード差分プレビュー（before=既存ローカル, after=リモート新内容）。 */
@@ -395,11 +455,15 @@ export class AppService {
 
   /** リモートファイル/ディレクトリを削除する。 */
   async deleteRemote(id: string, remotePath: string): Promise<void> {
+    assertSafeRemoteDeletionTarget(remotePath);
     return this.withTransport(id, (transport) => transport.delete(remotePath));
   }
 
   /** リモートファイルのパーミッションを変更する（対応トランスポートのみ）。 */
   async chmodRemote(id: string, remotePath: string, mode: number): Promise<void> {
+    if (!Number.isInteger(mode) || mode < 0 || mode > 0o7777) {
+      throw new Error('mode must be an integer between 0000 and 7777');
+    }
     return this.withTransport(id, async (transport) => {
       if (!transport.chmod) throw new Error('chmod is not supported by this transport');
       await transport.chmod(remotePath, mode);
@@ -411,6 +475,7 @@ export class AppService {
    * 実在するプロファイルの id 以外は受け付けない（未知の id での探索・書き込みを防ぐ）。
    */
   private async requireProfile(id: string): Promise<Profile> {
+    await this.profileMutations.idle();
     const profiles = await this.deps.profileStore.list();
     const profile = profiles.find((p) => p.id === id);
     if (!profile) throw new Error(`profile not found: ${id}`);
@@ -443,29 +508,36 @@ export class AppService {
 
   /** ブックマーク一覧（追加順。profileId 指定時はそのプロファイル分のみ）。 */
   async listBookmarks(profileId?: string): Promise<Bookmark[]> {
+    await this.bookmarkMutations.idle();
     const store = await this.deps.bookmarkStore.load();
     return store.list(profileId);
   }
 
   /** ブックマークを追加する（同一プロファイル・同一パスの重複は追加せず既存を返す）。 */
   async addBookmark(input: BookmarkInput): Promise<Bookmark> {
-    const store = await this.deps.bookmarkStore.load();
-    const added = store.add(input); // 不正入力はここで例外 → 保存しない
-    await this.deps.bookmarkStore.save(store);
-    return added;
+    return this.bookmarkMutations.run(async () => {
+      const store = await this.deps.bookmarkStore.load();
+      const added = store.add(input); // 不正入力はここで例外 → 保存しない
+      await this.deps.bookmarkStore.save(store);
+      return added;
+    });
   }
 
   async removeBookmark(id: string): Promise<void> {
-    const store = await this.deps.bookmarkStore.load();
-    store.remove(id);
-    await this.deps.bookmarkStore.save(store);
+    await this.bookmarkMutations.run(async () => {
+      const store = await this.deps.bookmarkStore.load();
+      store.remove(id);
+      await this.deps.bookmarkStore.save(store);
+    });
   }
 
   async renameBookmark(id: string, name: string): Promise<Bookmark> {
-    const store = await this.deps.bookmarkStore.load();
-    const renamed = store.rename(id, name);
-    await this.deps.bookmarkStore.save(store);
-    return renamed;
+    return this.bookmarkMutations.run(async () => {
+      const store = await this.deps.bookmarkStore.load();
+      const renamed = store.rename(id, name);
+      await this.deps.bookmarkStore.save(store);
+      return renamed;
+    });
   }
 
   private async resolveConnection(

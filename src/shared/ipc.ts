@@ -76,11 +76,15 @@ export interface SyncFolderOptions {
   compareBy?: CompareBy;
   deleteExtraneous?: boolean;
   ignore?: string[];
+  /** prepareSync が返した確認済みプランのトークン。ミラー削除時は必須。 */
+  expectedPlanToken?: string;
 }
 
 export interface PrepareSyncResult {
   plan: SyncAction[];
   summary: PlanSummary;
+  /** 実行時に同一プランであることを検証するためのトークン。 */
+  planToken: string;
 }
 
 export interface CommitSyncResult {

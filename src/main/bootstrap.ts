@@ -26,6 +26,8 @@ import type { HistoryController } from './ipc/register';
 /** IPC 用の履歴口に、プロファイル削除時の掃除（removeByProfile）を足したもの。 */
 export interface MainHistoryController extends HistoryController {
   removeByProfile(profileId: string): number;
+  /** 予約済みの履歴保存が完了するまで待つ（終了処理・テスト用）。 */
+  flush(): Promise<void>;
 }
 
 /** ホスト鍵の検証・記録に必要な最小の構造型（KnownHostsController のサブセット）。 */
@@ -74,8 +76,11 @@ async function createHistoryController(
 ): Promise<MainHistoryController> {
   const historyFile = new HistoryFile(filePath);
   const history: HistoryStore = await historyFile.load();
+  let saveTail: Promise<void> = Promise.resolve();
   const save = (): void => {
-    historyFile.save(history).catch((err: unknown) => reportStoreError('history.json', err));
+    saveTail = saveTail
+      .then(() => historyFile.save(history))
+      .catch((err: unknown) => reportStoreError('history.json', err));
   };
   return {
     append: (input: HistoryInput) => {
@@ -92,6 +97,7 @@ async function createHistoryController(
       if (removed > 0) save();
       return removed;
     },
+    flush: async () => saveTail,
   };
 }
 

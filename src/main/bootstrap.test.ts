@@ -147,6 +147,7 @@ describe('createAppServices', () => {
     });
 
     services.history.append({ id: 'h1', kind: 'upload', profileId: 'p1', path: '/a', status: 'success' });
+    await services.history.flush();
     expect(services.history.list()).toHaveLength(1);
   });
 });

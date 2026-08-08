@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { BookmarkStore, parseBookmarks, serializeBookmarks } from '../core/bookmark/index';
 import { writeFileAtomic } from './atomic-write';
+import { isFileNotFound } from './file-errors';
 
 /** ブックマークを JSON ファイルへ薄く永続化する。判定/整形は core/bookmark に委ねる。 */
 export class BookmarkFile {
@@ -10,8 +11,9 @@ export class BookmarkFile {
     try {
       const raw = await readFile(this.filePath, 'utf8');
       return new BookmarkStore({ initial: parseBookmarks(raw) });
-    } catch {
-      return new BookmarkStore();
+    } catch (err) {
+      if (isFileNotFound(err)) return new BookmarkStore();
+      throw err;
     }
   }
 

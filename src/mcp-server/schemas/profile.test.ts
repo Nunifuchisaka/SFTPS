@@ -63,19 +63,17 @@ describe('profileSchema', () => {
     expect(result).not.toHaveProperty('unexpectedField');
   });
 
-  it('only checks structure, not business rules (e.g. port range is not enforced here)', () => {
-    // core/profile の validateProfile が業務ルール（port 1-65535 等）を別途検証する。
-    // zod 側はあくまで構造検証であることを明示するためのテスト。
-    const result = profileSchema.parse({
-      id: 'p1',
-      name: 'x',
-      protocol: 'ftp',
-      host: 'h',
-      port: 999999,
-      user: 'u',
-    });
-    if (result.protocol !== 'ftp') throw new Error('expected ftp');
-    expect(result.port).toBe(999999);
+  it('rejects values outside the IPC/MCP safety bounds', () => {
+    expect(() =>
+      profileSchema.parse({
+        id: 'p1',
+        name: 'x',
+        protocol: 'ftp',
+        host: 'h',
+        port: 999999,
+        user: 'u',
+      }),
+    ).toThrow();
   });
 });
 

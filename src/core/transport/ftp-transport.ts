@@ -76,6 +76,13 @@ export class FtpTransport implements RemoteTransport {
     }
   }
 
+  async directoryExists(remotePath: string): Promise<boolean> {
+    const base = posixBasename(remotePath);
+    if (base === '') return true;
+    const infos = await this.client.list(posixDirname(remotePath));
+    return infos.some((info) => info.name === base && info.type === FileType.Directory);
+  }
+
   /**
    * FTP の DELE はファイル専用のため、失敗時はディレクトリとみなして
    * removeDir（再帰削除）へフォールバックする。両方失敗した場合は

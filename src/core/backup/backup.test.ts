@@ -10,6 +10,16 @@ describe('sanitizeRemotePath', () => {
     const s = sanitizeRemotePath('/a:b*c?d"e<f>g|h\\i/j');
     expect(s).not.toMatch(/[\\/:*?"<>|]/);
   });
+
+  it('does not collide for paths that the legacy replacement scheme conflated', () => {
+    expect(sanitizeRemotePath('/a/b')).not.toBe(sanitizeRemotePath('/a_b'));
+    expect(sanitizeRemotePath('/a:b')).not.toBe(sanitizeRemotePath('/a_b'));
+  });
+
+  it('uses a fixed-length Windows-safe key for very long remote paths', () => {
+    const key = sanitizeRemotePath(`/${'deep/'.repeat(1000)}file.txt`);
+    expect(key).toMatch(/^v2_[a-f0-9]{64}$/);
+  });
 });
 
 describe('sanitizeBackupNamespace', () => {
@@ -133,6 +143,18 @@ describe('BackupManager', () => {
     await mgr.backupExisting(transport, 'p/download', '/f.txt');
     expect(await mgr.listBackups('p', '/f.txt')).toHaveLength(1);
     expect(await mgr.listBackups('p/download', '/f.txt')).toHaveLength(1);
+  });
+
+  it('keeps generations for formerly-colliding remote paths separate', async () => {
+    const times = ['2026-07-20T00:00:00.000Z', '2026-07-20T00:00:01.000Z'];
+    let i = 0;
+    const mgr = new BackupManager({ backupRoot, now: () => new Date(times[i++]) });
+    await transport.writeFile('/a/b', Buffer.from('nested'));
+    await transport.writeFile('/a_b', Buffer.from('flat'));
+    await mgr.backupExisting(transport, 'p', '/a/b');
+    await mgr.backupExisting(transport, 'p', '/a_b');
+    expect((await mgr.restore('p', '/a/b')).toString()).toBe('nested');
+    expect((await mgr.restore('p', '/a_b')).toString()).toBe('flat');
   });
 });
 

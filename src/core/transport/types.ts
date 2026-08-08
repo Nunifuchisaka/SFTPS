@@ -19,6 +19,8 @@ export interface RemoteTransport {
   readFile(remotePath: string): Promise<Buffer>;
   writeFile(remotePath: string, data: Buffer): Promise<void>;
   exists(remotePath: string): Promise<boolean>;
+  /** ディレクトリの存在判定。判定不能な通信・権限エラーはfalseにせず例外にする。 */
+  directoryExists?(remotePath: string): Promise<boolean>;
   delete(remotePath: string): Promise<void>;
   mkdir(remotePath: string): Promise<void>;
   /** リネーム/移動。プロトコル非対応の場合は未実装（undefined）。 */

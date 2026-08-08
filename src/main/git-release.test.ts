@@ -62,6 +62,8 @@ describe('createReleaseZip', () => {
   it('runs git archive HEAD with the given pathspec files, scoped to the repo root', async () => {
     let captured: { command: string; args: string[]; cwd: string } | null = null;
     const deps = makeDeps(async (command, args, options) => {
+      if (args[0] === 'rev-parse') return { stdout: '/repo\n', stderr: '' };
+      if (args[0] === 'diff') return { stdout: 'M\ta.ts\nM\tb.ts\n', stderr: '' };
       captured = { command, args, cwd: options.cwd };
       return { stdout: '', stderr: '' };
     });
@@ -71,5 +73,23 @@ describe('createReleaseZip', () => {
       args: ['archive', 'HEAD', '-o', '/tmp/release.zip', '--', 'a.ts', 'b.ts'],
       cwd: '/repo',
     });
+  });
+
+  it('rejects an empty selection instead of archiving the entire repository', async () => {
+    const deps = makeDeps(async () => ({ stdout: '', stderr: '' }));
+    await expect(createReleaseZip('/repo', [], '/tmp/release.zip', deps)).rejects.toThrow(
+      'at least one',
+    );
+  });
+
+  it('rejects files outside the confirmed diff', async () => {
+    const deps = makeDeps(async (_command, args) => {
+      if (args[0] === 'rev-parse') return { stdout: '/repo\n', stderr: '' };
+      if (args[0] === 'diff') return { stdout: 'M\ta.ts\n', stderr: '' };
+      return { stdout: '', stderr: '' };
+    });
+    await expect(
+      createReleaseZip('/repo', ['../secret.txt'], '/tmp/release.zip', deps),
+    ).rejects.toThrow('confirmed release diff');
   });
 });

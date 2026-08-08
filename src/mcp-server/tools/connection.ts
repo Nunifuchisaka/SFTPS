@@ -1,8 +1,8 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { z } from 'zod';
 import type { AppService } from '../../main/app-service';
 import { enrichConnectionResult, withHostKeyErrorEnrichment, type HostKeyRejectionTracker } from '../host-key-bridge';
 import { textResult } from '../tool-result';
+import { profileIdSchema, remotePathSchema } from '../schemas/common';
 
 export interface ConnectionToolDeps {
   service: Pick<AppService, 'listProfiles' | 'testConnection' | 'listRemote'>;
@@ -17,7 +17,8 @@ export function registerConnectionTools(server: McpServer, deps: ConnectionToolD
       description:
         'プロファイルへの疎通確認を行う（副作用なし）。SFTP で未知/変更されたホスト鍵が原因の場合は、' +
         'trust_host_key の呼び出しにそのまま使える指紋情報つきのエラーメッセージを返す。',
-      inputSchema: { id: z.string() },
+      inputSchema: { id: profileIdSchema },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
     },
     async ({ id }) => {
       const result = await deps.service.testConnection(id);
@@ -29,7 +30,8 @@ export function registerConnectionTools(server: McpServer, deps: ConnectionToolD
     'list_remote',
     {
       description: 'リモートディレクトリの一覧（ファイル/ディレクトリ、サイズ、更新日時）を取得する。',
-      inputSchema: { id: z.string(), remoteDir: z.string() },
+      inputSchema: { id: profileIdSchema, remoteDir: remotePathSchema },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
     },
     async ({ id, remoteDir }) =>
       textResult(

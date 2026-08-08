@@ -5,11 +5,14 @@ import type { RemoteTransport } from './types';
 interface ListResponse {
   CommonPrefixes?: Array<{ Prefix?: string }>;
   Contents?: Array<{ Key?: string; Size?: number; LastModified?: Date }>;
+  IsTruncated?: boolean;
+  NextContinuationToken?: string;
 }
 
 class FakeS3Client implements S3ClientLike {
   objects = new Map<string, Buffer>();
   listByPrefix = new Map<string, ListResponse>();
+  listPages: ListResponse[] = [];
   puts: Array<{ Key: string; Body: Buffer }> = [];
   deletes: string[] = [];
   copies: Array<{ CopySource: string; Key: string }> = [];
@@ -20,6 +23,7 @@ class FakeS3Client implements S3ClientLike {
     const input = command.input;
     switch (name) {
       case 'ListObjectsV2Command':
+        if (this.listPages.length > 0) return this.listPages.shift() ?? {};
         return this.listByPrefix.get(String(input.Prefix ?? '')) ?? {};
       case 'GetObjectCommand': {
         const key = String(input.Key);
@@ -108,6 +112,28 @@ describe('S3Transport', () => {
     const t = new S3Transport(fake, 'my-bucket');
     const entries = await t.list('/');
     expect(entries.map((e) => `${e.type}:${e.path}`)).toEqual(['dir:/dir1', 'file:/top.txt']);
+  });
+
+  it('follows continuation tokens until every page has been listed', async () => {
+    const fake = new FakeS3Client();
+    fake.listPages.push(
+      {
+        Contents: [{ Key: 'a.txt', Size: 1 }],
+        IsTruncated: true,
+        NextContinuationToken: 'page-2',
+      },
+      { Contents: [{ Key: 'b.txt', Size: 2 }], IsTruncated: false },
+    );
+    const t = new S3Transport(fake, 'my-bucket');
+    const entries = await t.list('/');
+    expect(entries.map((entry) => entry.path)).toEqual(['/a.txt', '/b.txt']);
+  });
+
+  it('fails closed when a truncated response has no continuation token', async () => {
+    const fake = new FakeS3Client();
+    fake.listPages.push({ IsTruncated: true });
+    const t = new S3Transport(fake, 'my-bucket');
+    await expect(t.list('/')).rejects.toThrow('continuation token');
   });
 
   it('readFile normalizes the path to a key (strips leading slash) and reads the body', async () => {

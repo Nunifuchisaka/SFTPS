@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -80,5 +80,19 @@ describe('SecretStore', () => {
       SecretEncryptionUnavailableError,
     );
     expect(existsSync(filePath)).toBe(false);
+  });
+
+  it('fails closed on malformed JSON and does not overwrite the damaged file', async () => {
+    await writeFile(filePath, '{ damaged', 'utf8');
+    const store = new SecretStore({ safeStorage: safe, filePath });
+    await expect(store.setSecrets('a', { password: 'x' })).rejects.toThrow();
+    expect(await readFile(filePath, 'utf8')).toBe('{ damaged');
+  });
+
+  it('fails closed when a decrypted profile payload is not a string record', async () => {
+    const store = new SecretStore({ safeStorage: safe, filePath });
+    const invalid = safe.encryptString(JSON.stringify({ password: 123 })).toString('base64');
+    await writeFile(filePath, JSON.stringify({ p1: invalid }), 'utf8');
+    await expect(store.getSecrets('p1')).rejects.toThrow('must be a string');
   });
 });

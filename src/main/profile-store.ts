@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { parseProfiles, serializeProfiles, type Profile } from '../core/profile/index';
 import { writeFileAtomic } from './atomic-write';
+import { isFileNotFound } from './file-errors';
 
 /**
  * 接続プロファイル（シークレット非保持）を JSON ファイルへ永続化する。
@@ -13,8 +14,9 @@ export class ProfileStore {
     let raw: string;
     try {
       raw = await readFile(this.filePath, 'utf8');
-    } catch {
-      return [];
+    } catch (err) {
+      if (isFileNotFound(err)) return [];
+      throw err;
     }
     return parseProfiles(raw);
   }

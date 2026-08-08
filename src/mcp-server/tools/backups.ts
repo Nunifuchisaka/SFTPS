@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { AppService } from '../../main/app-service';
 import { withHostKeyErrorEnrichment, type HostKeyRejectionTracker } from '../host-key-bridge';
 import { textResult } from '../tool-result';
+import { profileIdSchema, remotePathSchema } from '../schemas/common';
 
 export interface BackupToolDeps {
   service: Pick<AppService, 'listProfiles' | 'listBackups' | 'restoreBackup'>;
@@ -15,7 +16,8 @@ export function registerBackupTools(server: McpServer, deps: BackupToolDeps): vo
     'list_backups',
     {
       description: '指定したリモートパスに対するバックアップ世代（タイムスタンプ・サイズ）を新しい順に返す。',
-      inputSchema: { id: z.string(), remotePath: z.string() },
+      inputSchema: { id: profileIdSchema, remotePath: remotePathSchema },
+      annotations: { readOnlyHint: true, destructiveHint: false },
     },
     async ({ id, remotePath }) => textResult(await deps.service.listBackups(id, remotePath)),
   );
@@ -27,7 +29,12 @@ export function registerBackupTools(server: McpServer, deps: BackupToolDeps): vo
         'バックアップ内容をリモートへ書き戻す（timestamp 省略時は最新世代）。' +
         '復元前に現在のリモート内容も自動でバックアップされる（誤った世代を選んでも直前の状態へ戻せる）。' +
         'timestamp は ISO 8601 形式の文字列（例: "2026-01-01T00:00:00.000Z"）で指定する。',
-      inputSchema: { id: z.string(), remotePath: z.string(), timestamp: z.string().optional() },
+      inputSchema: {
+        id: profileIdSchema,
+        remotePath: remotePathSchema,
+        timestamp: z.string().datetime().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
     },
     async ({ id, remotePath, timestamp }) =>
       textResult(

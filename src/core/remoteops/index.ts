@@ -1,2 +1,7 @@
 export { parseMode, isActionAvailable, type RemoteAction } from './permissions';
-export { confirmDeletion, type DeletionConfirm } from './deletion';
+export {
+  assertSafeRemoteDeletionTarget,
+  confirmDeletion,
+  isDangerousRemoteDeletionTarget,
+  type DeletionConfirm,
+} from './deletion';

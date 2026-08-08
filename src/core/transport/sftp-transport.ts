@@ -64,6 +64,10 @@ export class SftpTransport implements RemoteTransport {
     return (await this.client.exists(remotePath)) !== false;
   }
 
+  async directoryExists(remotePath: string): Promise<boolean> {
+    return (await this.client.exists(remotePath)) === 'd';
+  }
+
   async delete(remotePath: string): Promise<void> {
     await this.client.delete(remotePath);
   }

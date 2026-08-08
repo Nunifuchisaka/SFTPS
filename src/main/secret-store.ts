@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { writeFileAtomic } from './atomic-write';
+import { assertStringRecord, isFileNotFound } from './file-errors';
 
 /** Electron の safeStorage のうち SecretStore が利用する API のみを表す構造型。 */
 export interface SafeStorageLike {
@@ -62,7 +63,7 @@ export class SecretStore {
     const blob = all[profileId];
     if (blob === undefined) return null;
     const decrypted = this.safeStorage.decryptString(Buffer.from(blob, 'base64'));
-    return JSON.parse(decrypted) as Record<string, string>;
+    return assertStringRecord(JSON.parse(decrypted) as unknown, `secrets for ${profileId}`);
   }
 
   async deleteSecrets(profileId: string): Promise<void> {
@@ -73,12 +74,14 @@ export class SecretStore {
   }
 
   private async readAll(): Promise<SecretFile> {
+    let raw: string;
     try {
-      const raw = await readFile(this.filePath, 'utf8');
-      return JSON.parse(raw) as SecretFile;
-    } catch {
-      return {};
+      raw = await readFile(this.filePath, 'utf8');
+    } catch (err) {
+      if (isFileNotFound(err)) return {};
+      throw err;
     }
+    return assertStringRecord(JSON.parse(raw) as unknown, 'secrets file');
   }
 
   private async writeAll(data: SecretFile): Promise<void> {

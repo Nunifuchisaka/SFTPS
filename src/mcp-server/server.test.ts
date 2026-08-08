@@ -43,7 +43,11 @@ function fakeAppService(overrides: Partial<McpAppService> = {}): McpAppService {
       afterSize: 3,
     })),
     download: vi.fn(async () => ({ backupPath: null, bytesWritten: 3 })),
-    prepareSync: vi.fn(async () => ({ plan: [], summary: { upload: 0, createDir: 0, skip: 0, deleteExtra: 0 } })),
+    prepareSync: vi.fn(async () => ({
+      plan: [],
+      summary: { upload: 0, createDir: 0, skip: 0, deleteExtra: 0 },
+      planToken: 'a'.repeat(64),
+    })),
     commitSync: vi.fn(async () => ({
       result: { uploaded: 0, createdDirs: 0, skipped: 0, deleted: 0, backups: [], canceled: false },
       summary: { upload: 0, createDir: 0, skip: 0, deleteExtra: 0 },
@@ -231,12 +235,14 @@ describe('createMcpServer tools', () => {
   });
 
   it('trust_host_key rejects overwriting a different recorded fingerprint (mismatch guard)', async () => {
-    const knownHosts = fakeKnownHosts({ lookup: vi.fn(() => 'SHA256:old') });
+    const known = `SHA256:${'o'.repeat(43)}`;
+    const requested = `SHA256:${'n'.repeat(43)}`;
+    const knownHosts = fakeKnownHosts({ lookup: vi.fn(() => known) });
     const { client } = await connectedClient({ knownHosts });
 
     const result = await client.callTool({
       name: 'trust_host_key',
-      arguments: { host: 'sftp.example.com', port: 22, fingerprint: 'SHA256:new' },
+      arguments: { host: 'sftp.example.com', port: 22, fingerprint: requested },
     });
 
     expect(result.isError).toBe(true);
@@ -245,16 +251,17 @@ describe('createMcpServer tools', () => {
   });
 
   it('trust_host_key succeeds for a genuinely unknown host', async () => {
+    const requested = `SHA256:${'n'.repeat(43)}`;
     const knownHosts = fakeKnownHosts();
     const { client } = await connectedClient({ knownHosts });
 
     const result = await client.callTool({
       name: 'trust_host_key',
-      arguments: { host: 'sftp.example.com', port: 22, fingerprint: 'SHA256:new' },
+      arguments: { host: 'sftp.example.com', port: 22, fingerprint: requested },
     });
 
     expect(result.isError).toBeFalsy();
-    expect(knownHosts.trust).toHaveBeenCalledWith('sftp.example.com', 22, 'SHA256:new');
+    expect(knownHosts.trust).toHaveBeenCalledWith('sftp.example.com', 22, requested);
   });
 
   it('remove_host_key and list_known_hosts pass through to the gateway', async () => {

@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtemp, rm, readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, parse } from 'node:path';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { LocalTransport } from '../core/transport/index';
+import { LocalTransport, type RemoteTransport } from '../core/transport/index';
 import { BackupManager } from '../core/backup/index';
 import { HistoryStore } from '../core/history/index';
 import { KnownHostsStore } from '../core/hostkey/index';
@@ -110,6 +110,28 @@ describe('AppService', () => {
     await service.saveProfile(ftpProfile);
     const store = new SecretStore({ safeStorage: safe, filePath: secretFile });
     expect(await store.getSecrets('p1')).toEqual({ password: 'hunter2' });
+  });
+
+  it('rolls secret changes back when profile persistence fails', async () => {
+    const failingProfiles = new ProfileStore(join(dir, 'rollback-profiles.json'));
+    vi.spyOn(failingProfiles, 'saveAll').mockRejectedValueOnce(new Error('profile disk full'));
+    const secrets = new SecretStore({ safeStorage: safe, filePath: join(dir, 'rollback-secrets.json') });
+    const isolated = new AppService({
+      profileStore: failingProfiles,
+      secretStore: secrets,
+      backupManager: new BackupManager({ backupRoot: join(dir, 'rollback-backups') }),
+      bookmarkStore: new BookmarkFile(join(dir, 'rollback-bookmarks.json')),
+      createTransport: () => transport,
+    });
+
+    await expect(isolated.saveProfile(ftpProfile)).rejects.toThrow('profile disk full');
+    expect(await secrets.getSecrets('p1')).toBeNull();
+  });
+
+  it('serializes concurrent profile saves without losing either profile', async () => {
+    const another = { ...ftpProfile, id: 'p2', name: 'Second' };
+    await Promise.all([service.saveProfile(ftpProfile), service.saveProfile(another)]);
+    expect((await service.listProfiles()).map((profile) => profile.id).sort()).toEqual(['p1', 'p2']);
   });
 
   it('saveProfile is rejected (nothing persisted) when encryption is unavailable and secrets exist', async () => {
@@ -294,6 +316,17 @@ describe('AppService', () => {
     expect(r.result.uploaded).toBe(1);
   });
 
+  it('prepareSync treats a confirmed missing destination as empty without swallowing errors', async () => {
+    await service.saveProfile(ftpProfile);
+    const srcDir = join(dir, 'new-destination');
+    await writeLocal(join(srcDir, 'a.txt'), Buffer.from('a'));
+    const prepared = await service.prepareSync('p1', srcDir, '/does-not-exist', {
+      compareBy: 'size',
+    });
+    expect(prepared.summary.upload).toBe(1);
+    expect(prepared.planToken).toMatch(/^[a-f0-9]{64}$/);
+  });
+
   it('commitSync backs up extraneous remote files before mirror-deleting them', async () => {
     await service.saveProfile(ftpProfile);
     const srcDir = join(dir, 'mirror');
@@ -301,13 +334,51 @@ describe('AppService', () => {
     await transport.connect();
     await transport.writeFile('/site/gone.txt', Buffer.from('LOST'));
 
+    const prepared = await service.prepareSync('p1', srcDir, '/site', {
+      compareBy: 'size',
+      deleteExtraneous: true,
+    });
     const r = await service.commitSync('p1', srcDir, '/site', {
       compareBy: 'size',
       deleteExtraneous: true,
+      expectedPlanToken: prepared.planToken,
     });
     expect(r.result.deleted).toBe(1);
     expect(await transport.exists('/site/gone.txt')).toBe(false);
     expect((await service.restoreBackup('p1', '/site/gone.txt')).bytesWritten).toBe(4);
+  });
+
+  it('commitSync rejects execution when the confirmed mirror plan has changed', async () => {
+    await service.saveProfile(ftpProfile);
+    const srcDir = join(dir, 'changing-plan');
+    await writeLocal(join(srcDir, 'a.txt'), Buffer.from('a'));
+    await transport.connect();
+    await transport.mkdir('/site');
+    const prepared = await service.prepareSync('p1', srcDir, '/site', {
+      compareBy: 'size',
+      deleteExtraneous: true,
+    });
+    await transport.writeFile('/site/new-after-preview.txt', Buffer.from('keep'));
+
+    await expect(
+      service.commitSync('p1', srcDir, '/site', {
+        compareBy: 'size',
+        deleteExtraneous: true,
+        expectedPlanToken: prepared.planToken,
+      }),
+    ).rejects.toThrow('plan changed');
+    expect(await transport.exists('/site/new-after-preview.txt')).toBe(true);
+  });
+
+  it('commitSync requires a confirmed token before mirror deletion', async () => {
+    await service.saveProfile(ftpProfile);
+    const srcDir = join(dir, 'missing-token');
+    await writeLocal(join(srcDir, 'a.txt'), Buffer.from('a'));
+    await transport.connect();
+    await transport.mkdir('/site');
+    await expect(
+      service.commitSync('p1', srcDir, '/site', { deleteExtraneous: true }),
+    ).rejects.toThrow('confirmed sync plan token');
   });
 
   it('commitUpload does not touch the remote when the signal is already aborted', async () => {
@@ -371,7 +442,7 @@ describe('AppService', () => {
     expect((await readFile(join(destDir, 'sub', 'b.txt'), 'utf8'))).toBe('bb');
     expect(r.result.uploaded).toBe(2);
     // overwrite of the existing local a.txt was backed up
-    const backups = await service.listBackups('p1', '/a.txt');
+    const backups = await new BackupManager({ backupRoot }).listBackups('p1/download', '/a.txt');
     expect(backups).toHaveLength(1);
   });
 
@@ -388,8 +459,46 @@ describe('AppService', () => {
     });
     expect(r.result.deleted).toBe(1);
     expect(existsSync(join(destDir, 'gone.txt'))).toBe(false);
-    const backups = await service.listBackups('p1', '/gone.txt');
+    const backups = await new BackupManager({ backupRoot }).listBackups('p1/download', '/gone.txt');
     expect(backups).toHaveLength(1);
+  });
+
+  it('commitDownloadSync never treats a remote listing failure as an empty source', async () => {
+    const failingTransport: RemoteTransport = {
+      connect: async () => undefined,
+      disconnect: async () => undefined,
+      list: async () => {
+        throw new Error('temporary listing failure');
+      },
+      readFile: async () => Buffer.alloc(0),
+      writeFile: async () => undefined,
+      exists: async () => false,
+      delete: async () => undefined,
+      mkdir: async () => undefined,
+    };
+    const isolated = new AppService({
+      profileStore: new ProfileStore(join(dir, 'isolated-profiles.json')),
+      secretStore: new SecretStore({ safeStorage: safe, filePath: join(dir, 'isolated-secrets.json') }),
+      backupManager: new BackupManager({ backupRoot: join(dir, 'isolated-backups') }),
+      bookmarkStore: new BookmarkFile(join(dir, 'isolated-bookmarks.json')),
+      createTransport: () => failingTransport,
+    });
+    await isolated.saveProfile(ftpProfile);
+    const destDir = join(dir, 'listing-failure-dest');
+    const precious = join(destDir, 'precious.txt');
+    await writeLocal(precious, Buffer.from('KEEP'));
+
+    await expect(
+      isolated.commitDownloadSync('p1', '/site', destDir, { deleteExtraneous: true }),
+    ).rejects.toThrow('temporary listing failure');
+    expect(await readFile(precious, 'utf8')).toBe('KEEP');
+  });
+
+  it('commitDownloadSync rejects mirror deletion at the local filesystem root', async () => {
+    await service.saveProfile(ftpProfile);
+    await expect(
+      service.commitDownloadSync('p1', '/site', parse(dir).root, { deleteExtraneous: true }),
+    ).rejects.toThrow('local filesystem root');
   });
 
   it('commitDownloadSync stops without transferring when the signal is already aborted', async () => {
@@ -429,11 +538,24 @@ describe('AppService', () => {
     expect(await transport.exists('/gone.txt')).toBe(false);
   });
 
+  it.each(['', '/', '////', '.', '..', '/folder/..'])(
+    'deleteRemote refuses a root-equivalent path: %j',
+    async (remotePath) => {
+      await service.saveProfile(ftpProfile);
+      await expect(service.deleteRemote('p1', remotePath)).rejects.toThrow('remote root');
+    },
+  );
+
   it('chmodRemote applies a mode when the transport supports it', async () => {
     await service.saveProfile(ftpProfile);
     await transport.connect();
     await transport.writeFile('/c.txt', Buffer.from('x'));
     await expect(service.chmodRemote('p1', '/c.txt', 0o644)).resolves.toBeUndefined();
+  });
+
+  it.each([-1, 0o10000, 1.5])('chmodRemote rejects an unsafe mode: %s', async (mode) => {
+    await service.saveProfile(ftpProfile);
+    await expect(service.chmodRemote('p1', '/c.txt', mode)).rejects.toThrow('mode must');
   });
 
   it('prepareSync with compareBy checksum detects same-size content changes', async () => {

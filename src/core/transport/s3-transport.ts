@@ -68,11 +68,31 @@ export class S3Transport implements RemoteTransport {
 
   async list(remoteDir: string): Promise<RemoteEntry[]> {
     const prefix = toPrefix(remoteDir);
-    const out = await this.client.send(
-      new ListObjectsV2Command({ Bucket: this.bucket, Prefix: prefix, Delimiter: '/' }),
-    );
+    const prefixes = [] as NonNullable<ListObjectsV2CommandOutput['CommonPrefixes']>;
+    const contents = [] as NonNullable<ListObjectsV2CommandOutput['Contents']>;
+    const seenTokens = new Set<string>();
+    let continuationToken: string | undefined;
+    do {
+      const out = await this.client.send(
+        new ListObjectsV2Command({
+          Bucket: this.bucket,
+          Prefix: prefix,
+          Delimiter: '/',
+          ...(continuationToken !== undefined ? { ContinuationToken: continuationToken } : {}),
+        }),
+      );
+      prefixes.push(...(out.CommonPrefixes ?? []));
+      contents.push(...(out.Contents ?? []));
+      if (!out.IsTruncated) break;
+      const next = out.NextContinuationToken;
+      if (!next || seenTokens.has(next)) {
+        throw new Error('S3 listing was truncated without a usable continuation token');
+      }
+      seenTokens.add(next);
+      continuationToken = next;
+    } while (true);
 
-    const dirs: RemoteEntry[] = (out.CommonPrefixes ?? []).map((cp) => {
+    const dirs: RemoteEntry[] = prefixes.map((cp) => {
       const full = (cp.Prefix ?? '').replace(/\/$/, '');
       return {
         name: keyBasename(full),
@@ -83,7 +103,7 @@ export class S3Transport implements RemoteTransport {
       };
     });
 
-    const files: RemoteEntry[] = (out.Contents ?? [])
+    const files: RemoteEntry[] = contents
       .filter((o) => (o.Key ?? '') !== prefix)
       .map((o) => {
         const key = o.Key ?? '';
@@ -122,6 +142,11 @@ export class S3Transport implements RemoteTransport {
       if (isNotFound(err)) return false;
       throw err;
     }
+  }
+
+  async directoryExists(_remotePath: string): Promise<boolean> {
+    // S3のディレクトリは仮想プレフィックスであり、空のプレフィックスも安全にlistできる。
+    return true;
   }
 
   async delete(remotePath: string): Promise<void> {
